@@ -1,6 +1,6 @@
 # 09: validators（zog 场景集成）
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 **What to build:** zog 验证与模型接线：模型 `Rules()` 返回 场景 -> zog schema 映射，`Validate(scenario)` 返回 `map[字段][]消息`；保存链路按 Insert/Update 场景自动触发，校验失败拒绝落库；消息模板可自定义（i18n 翻译在 18 接）。
 
