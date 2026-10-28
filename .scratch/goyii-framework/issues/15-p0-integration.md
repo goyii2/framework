@@ -1,6 +1,6 @@
 # 15: P0 集成验证（examples/basic）
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 **What to build:** examples/basic 以 SQLite 零依赖跑通 P0 全链路：配置装配 -> migrate 建表 -> seed -> 登录 -> 带验证的 CRUD 端点（错误处理/中间件/日志/缓存全部参与）；docs/ 起步（安装与快速上手）。
 
