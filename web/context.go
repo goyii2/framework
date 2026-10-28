@@ -85,6 +85,16 @@ func (c *Context) JSON(v any) error {
 	return json.NewEncoder(c.w).Encode(v)
 }
 
+// JSONStatus writes v as the response body with an explicit status code and
+// an application/json content type — the reply shape for payloads rejected
+// before normal processing, such as model validation failures returned with
+// 422 and their field -> messages map.
+func (c *Context) JSONStatus(status int, v any) error {
+	c.w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	c.w.WriteHeader(status)
+	return json.NewEncoder(c.w).Encode(v)
+}
+
 // Redirect replies with the redirect status and a Location header pointing
 // at url.
 func (c *Context) Redirect(status int, url string) error {

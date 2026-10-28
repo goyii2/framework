@@ -7,6 +7,8 @@ import (
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
+
+	"github.com/goyii2/framework/validators"
 )
 
 // Model gives Active Record model structs their instance persistence
@@ -19,11 +21,12 @@ import (
 //	    Name string `gorm:"column:name"`
 //	}
 //
-// Instances become bound — able to Save, Delete and Reload — through the
-// package entry points that hand them out: New[T](ctx).New() for a fresh
-// record, FindByID and query results for existing rows. The bound context is
-// the one the record was created with, so instances obtained inside a
-// Transaction closure keep participating in that transaction afterwards.
+// Instances become bound — able to Save, Delete, Reload and Validate —
+// through the package entry points that hand them out: New[T](ctx).New() for
+// a fresh record, FindByID and query results for existing rows. The bound
+// context is the one the record was created with, so instances obtained
+// inside a Transaction closure keep participating in that transaction
+// afterwards.
 type Model struct {
 	ctx    context.Context
 	record any
@@ -59,19 +62,73 @@ func (m *Model) handle() (*gorm.DB, error) {
 	return session(m.ctx)
 }
 
+// Context returns the context the record is bound to — the one it was
+// created or loaded with, carrying the application and any open transaction.
+// Validation rules that need the database (a uniqueness check, say) use it
+// to query through this package instead of reaching for a global handle.
+func (m *Model) Context() context.Context { return m.ctx }
+
+// Validate checks the record against the schemas its Rules method declares
+// for scenario and returns the per-field message list; nil means the record
+// is valid, as does a model without Rules or a scenario without a schema.
+func (m *Model) Validate(scenario validators.Scenario) map[string][]string {
+	if err := validators.Validate(m.record, scenario); err != nil {
+		return err.Fields
+	}
+	return nil
+}
+
 // Save writes the record back to the database: an insert when its primary
-// key is zero, an update of the full row otherwise. Lifecycle hooks the
-// model implements (BeforeSave, BeforeCreate, ...) run as part of the
-// write.
+// key is zero, an update of the full row otherwise. When the model declares
+// validation rules, the matching scenario is validated first and an invalid
+// record is refused before any statement runs. Lifecycle hooks the model
+// implements (BeforeSave, BeforeCreate, ...) run as part of the write.
 func (m *Model) Save() error {
 	handle, err := m.handle()
 	if err != nil {
+		return err
+	}
+	if err := m.validateBeforeSave(handle); err != nil {
 		return err
 	}
 	if err := handle.Save(m.record).Error; err != nil {
 		return fmt.Errorf("ar: save %T: %w", m.record, err)
 	}
 	return nil
+}
+
+// validateBeforeSave runs the model's rules for the scenario this save
+// constitutes: insert when the primary key is zero, update otherwise — the
+// same split the write itself applies. Models without Rules skip validation
+// entirely, and a RuleSet without a schema for the scenario passes.
+func (m *Model) validateBeforeSave(handle *gorm.DB) error {
+	if _, ok := m.record.(validators.Ruled); !ok {
+		return nil
+	}
+	scenario, err := saveScenario(handle, m.record)
+	if err != nil {
+		return err
+	}
+	// The verdict must reach Save as a plain nil on success: returning the
+	// *Errors value directly would wrap a nil pointer in a non-nil error.
+	if verrs := validators.Validate(m.record, scenario); verrs != nil {
+		return verrs
+	}
+	return nil
+}
+
+// saveScenario reports whether the upcoming save of record is an insert or
+// an update, judged by the primary key the same way the write is.
+func saveScenario(handle *gorm.DB, record any) (validators.Scenario, error) {
+	field, err := primaryKey(handle, record)
+	if err != nil {
+		return "", err
+	}
+	_, zero := field.ValueOf(context.Background(), structValue(record))
+	if zero {
+		return validators.ScenarioInsert, nil
+	}
+	return validators.ScenarioUpdate, nil
 }
 
 // Delete removes the row carrying the record's primary key, running the
