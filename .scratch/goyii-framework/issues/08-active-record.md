@@ -1,6 +1,6 @@
 # 08: AR 泛型层
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 **What to build:** ActiveRecord 查询与持久化 API（PRD 共识样例）：`ar.New[T](ctx)` 链式查询（where/orderBy/limit/with/join）、`ar.FindByID`、实例 `Save/Delete/Reload`；模型生命周期经 GORM 钩子（BeforeCreate/BeforeUpdate/AfterDelete 等语义）；事务封装。
 
