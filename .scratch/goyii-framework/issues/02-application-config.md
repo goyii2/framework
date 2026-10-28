@@ -1,6 +1,6 @@
 # 02: Application 强类型容器 + config 双轨
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 **What to build:** 框架的心脏（ADR-0001）：Application 为强类型组件容器——组件接口字段 + 懒初始化（并发安全），经 context 携带贯穿请求链路（FromContext），另有包级默认实例供 CLI/后台使用。config 双轨：值走 yaml 多环境 + 环境变量覆盖，行为走代码组装。yaml/env 加载库选型在本票定稿。
 
