@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/goyii2/framework/base"
+	"github.com/goyii2/framework/url"
 )
 
 // Handler is the application's HTTP entry point: it mounts controller
@@ -11,35 +12,75 @@ import (
 // implements http.Handler so it plugs directly into net/http servers:
 //
 //	h := web.NewHandler(app)
-//	h.Handle("GET /post/view", postCtrl.ActionView)
+//	h.Get("/post/{id:[0-9]+}", postCtrl.ActionView).Name("post/view")
 //	http.ListenAndServe(app.Config().Web.Listen, h)
 //
 // Per request the pipeline is: trigger EventBeforeRequest, dispatch to the
 // mounted action with a fresh Context carrying the application, render any
 // returned error (format negotiated from Accept, panics recovered as 500),
-// then trigger EventAfterRequest.
+// then trigger EventAfterRequest. Requests no explicit pattern matches
+// land on the convention fallback (see router.go).
 type Handler struct {
 	app *base.Application
 	mux *http.ServeMux
+
+	// urls is the named-route table powering reverse URL generation.
+	urls *url.Manager
+	// conventionFallback enables /{controller}/{action} resolution for
+	// paths no explicit route matched; on by default, configurable off.
+	conventionFallback bool
 }
 
-// NewHandler creates the HTTP entry point serving app.
+// NewHandler creates the HTTP entry point serving app. The convention
+// fallback follows the application configuration (on unless explicitly
+// disabled) and can be flipped later with SetConventionFallback.
 func NewHandler(app *base.Application) *Handler {
-	return &Handler{app: app, mux: http.NewServeMux()}
+	h := &Handler{
+		app:                app,
+		mux:                http.NewServeMux(),
+		urls:               url.NewManager(),
+		conventionFallback: !app.Config().Web.DisableConventionFallback,
+	}
+	h.mountFallback()
+	return h
 }
+
+// URLs returns this handler's named-route table. Install it as the
+// package-level default (url.SetDefault) to let url.To resolve this
+// application's routes.
+func (h *Handler) URLs() *url.Manager { return h.urls }
+
+// SetConventionFallback toggles /{controller}/{action} resolution for
+// paths no explicit route matched. Explicit routes are unaffected either
+// way; call before serving in production code.
+func (h *Handler) SetConventionFallback(enabled bool) { h.conventionFallback = enabled }
 
 // Handle mounts action on the URL pattern (net/http ServeMux syntax,
-// including method prefixes such as "GET /post/view"). Full routing
-// (parameter syntax, naming, convention fallback, module prefixes) is
-// layered on separately.
+// including method prefixes such as "GET /post/view"); the Get/Post/...
+// helpers wrap it for method-specific mounts and return a Route handle
+// that can carry a name for reverse URL generation. Wildcards may carry
+// constraints, "{id:[0-9]+}", which the mux itself does not accept — they
+// are rewritten to plain wildcards and enforced per request (see
+// expandWildcards).
 func (h *Handler) Handle(pattern string, action Action) {
-	h.mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
+	clean, constraints := expandWildcards(pattern)
+	h.mux.HandleFunc(clean, func(w http.ResponseWriter, r *http.Request) {
 		c := FromContext(r.Context())
 		if c == nil {
 			// Reached without the pipeline in front (e.g. the mux was
 			// used standalone); there is no request Context to run in.
 			http.Error(w, "web: action invoked outside the application handler", http.StatusInternalServerError)
 			return
+		}
+		for _, wc := range constraints {
+			if !wc.re.MatchString(r.PathValue(wc.name)) {
+				// The value misses this binding's constraints, so the
+				// explicit route does not apply after all: finish the
+				// request through the convention fallback (a 404 when it
+				// cannot resolve the path either).
+				h.serveConvention(w, r)
+				return
+			}
 		}
 		// Keep the dispatched request so later routing layers can attach
 		// match information (wildcard values) to it.
@@ -52,9 +93,9 @@ func (h *Handler) Handle(pattern string, action Action) {
 // the request Context (carrying the application), trigger
 // EventBeforeRequest, dispatch, render any returned error (format
 // negotiated from Accept, panics recovered as 500), then trigger
-// EventAfterRequest with the final response status. Pattern misses fall
-// through to the mux's own 404 until the routing layer takes over
-// unknown-path handling.
+// EventAfterRequest with the final response status. Requests no pattern
+// matches are finished by the convention-fallback handler, so every miss
+// renders a negotiated 404 instead of the ServeMux default page.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r = r.WithContext(h.app.WithContext(r.Context()))
 	c := newContext(h.app, w, r)

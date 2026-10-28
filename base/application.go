@@ -18,6 +18,8 @@ type Application struct {
 	log     *component[Log]
 	events  eventRegistry
 	modules moduleRegistry
+
+	controllers controllerRegistry
 }
 
 // New assembles an Application from cfg, filling zero values with framework
@@ -64,6 +66,20 @@ func (a *Application) Module(prefix string) (*Module, bool) { return a.modules.l
 
 // Modules returns all registered modules sorted by prefix.
 func (a *Application) Modules() []*Module { return a.modules.list() }
+
+// RegisterController registers c under id in the application's root scope:
+// conventional routes without a module prefix (/{controller}/{action})
+// resolve through this registry, while modules keep their own. Duplicate
+// ids are rejected.
+func (a *Application) RegisterController(id string, c any) error {
+	return a.controllers.register(id, c)
+}
+
+// Controller returns the controller registered under id in the root scope.
+func (a *Application) Controller(id string) (any, bool) { return a.controllers.get(id) }
+
+// ControllerIDs returns the root-scope controller ids in registration order.
+func (a *Application) ControllerIDs() []string { return a.controllers.ids() }
 
 // appKey is the unexported context key under which the application travels.
 type appKey struct{}

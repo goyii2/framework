@@ -26,6 +26,11 @@ type App struct {
 // Web holds HTTP server values.
 type Web struct {
 	Listen string `yaml:"listen"` // host:port the server listens on
+
+	// DisableConventionFallback turns off /{controller}/{action} resolution
+	// for paths no explicit route matched. The fallback is on by default;
+	// disable it when every route is bound explicitly.
+	DisableConventionFallback bool `yaml:"disableConventionFallback"`
 }
 
 // DB holds the database connection values shared by DML and migrations.

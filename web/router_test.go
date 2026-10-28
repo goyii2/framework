@@ -1,0 +1,465 @@
+package web_test
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/goyii2/framework/base"
+	"github.com/goyii2/framework/config"
+	"github.com/goyii2/framework/url"
+	"github.com/goyii2/framework/web"
+)
+
+// siteController is registered in the application root scope and reached
+// through the /{controller}/{action} convention fallback.
+type siteController struct {
+	web.Controller
+}
+
+func (siteController) ActionHello(c *web.Context) error {
+	return c.JSON(map[string]string{"from": "convention"})
+}
+
+func (siteController) ActionBye(c *web.Context) error {
+	return c.JSON(map[string]string{"from": "bye-convention"})
+}
+
+// userController is registered only inside a module and must not resolve
+// outside its prefix.
+type userController struct {
+	web.Controller
+}
+
+func (userController) ActionList(c *web.Context) error {
+	return c.JSON(map[string]string{"from": "module-convention"})
+}
+
+// reportController has an action method with the right name but the wrong
+// signature; hitting it must surface a server error, not a silent miss.
+type reportController struct {
+	web.Controller
+}
+
+func (reportController) ActionBroken(c *web.Context, extra string) error { return nil }
+
+// newConventionApp assembles an application with one root controller and
+// one /admin module controller for convention-fallback tests.
+func newConventionApp(t *testing.T) (*web.Handler, *base.Application) {
+	t.Helper()
+	app := base.New(config.Default())
+	if err := app.RegisterController("site", siteController{}); err != nil {
+		t.Fatalf("registering root controller: %v", err)
+	}
+	admin, err := base.NewModule(app, "/admin")
+	if err != nil {
+		t.Fatalf("creating module: %v", err)
+	}
+	if err := app.RegisterModule(admin); err != nil {
+		t.Fatalf("registering module: %v", err)
+	}
+	if err := admin.RegisterController("user", userController{}); err != nil {
+		t.Fatalf("registering module controller: %v", err)
+	}
+	return web.NewHandler(app), app
+}
+
+// req performs a single request against h and returns the raw response.
+func req(t *testing.T, h http.Handler, method, target string) *http.Response {
+	t.Helper()
+	r := httptest.NewRequest(method, target, nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, r)
+	return rec.Result()
+}
+
+// method asserts the request succeeds and returns the body's "m" value.
+func method(t *testing.T, h http.Handler, m, target string) string {
+	t.Helper()
+	res := req(t, h, m, target)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d requesting %s %s", res.StatusCode, m, target)
+	}
+	var body map[string]string
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatalf("decoding body of %s %s: %v", m, target, err)
+	}
+	return body["m"]
+}
+
+// source asserts the request succeeds and returns the body's "from" value,
+// identifying which handler answered.
+func source(t *testing.T, h http.Handler, target string) string {
+	t.Helper()
+	res := do(t, h, target, "")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d requesting %s", res.StatusCode, target)
+	}
+	var body map[string]string
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatalf("decoding body of %s: %v", target, err)
+	}
+	return body["from"]
+}
+
+func TestExplicitRouteParamsTypedValues(t *testing.T) {
+	h := web.NewHandler(base.New(config.Default()))
+	h.Get("/post/{id:[0-9]+}/{slug}/{flag}", func(c *web.Context) error {
+		id, err := c.ParamInt("id")
+		if err != nil {
+			return web.BadRequest(err.Error())
+		}
+		flag, err := c.ParamBool("flag")
+		if err != nil {
+			return web.BadRequest(err.Error())
+		}
+		return c.JSON(map[string]any{"id": id, "slug": c.Param("slug"), "flag": flag})
+	})
+	h.Get("/n/{id:[0-9]+}", func(c *web.Context) error {
+		id, err := c.ParamInt64("id")
+		if err != nil {
+			return web.BadRequest(err.Error())
+		}
+		return c.JSON(map[string]any{"id64": id})
+	})
+
+	res := do(t, h, "/post/42/hello-world/1", "")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatalf("decoding body: %v", err)
+	}
+	if body["id"] != float64(42) || body["slug"] != "hello-world" || body["flag"] != true {
+		t.Errorf("body = %v, want typed path parameters echoed", body)
+	}
+
+	res = do(t, h, "/n/5000000000", "")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	body = nil
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatalf("decoding body: %v", err)
+	}
+	if body["id64"] != float64(5000000000) {
+		t.Errorf("body = %v, want id64 5000000000", body)
+	}
+}
+
+func TestTypedParamParseFailureBecomesBadRequest(t *testing.T) {
+	h := web.NewHandler(base.New(config.Default()))
+	h.Get("/big/{id:[0-9]+}", func(c *web.Context) error {
+		if _, err := c.ParamInt("id"); err != nil {
+			return web.BadRequest(err.Error())
+		}
+		return c.JSON(map[string]string{"ok": "yes"})
+	})
+
+	// The wildcard regex accepts the digits but the int does not fit:
+	// the typed getter must report the parse failure to the action.
+	res := do(t, h, "/big/99999999999999999999", "")
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for a non-int parameter", res.StatusCode)
+	}
+}
+
+func TestMethodHelpersAndMethodMismatch(t *testing.T) {
+	h := web.NewHandler(base.New(config.Default()))
+	h.Get("/thing", func(c *web.Context) error { return c.JSON(map[string]string{"m": "get"}) })
+	h.Post("/thing", func(c *web.Context) error { return c.JSON(map[string]string{"m": "post"}) })
+
+	if got := method(t, h, http.MethodGet, "/thing"); got != "get" {
+		t.Errorf("GET /thing = %q, want get", got)
+	}
+	if got := method(t, h, http.MethodPost, "/thing"); got != "post" {
+		t.Errorf("POST /thing = %q, want post", got)
+	}
+
+	// The convention catch-all matches every method, so a wrong-verb
+	// request falls through to it instead of a bare 405: /thing resolves
+	// nowhere by convention, hence 404. Verbs are a filter concern.
+	res := req(t, h, http.MethodPut, "/thing")
+	if res.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 via the convention fallback", res.StatusCode)
+	}
+}
+
+func TestNamedRoutesPowerReverseGeneration(t *testing.T) {
+	url.SetDefault(nil)
+	defer url.SetDefault(nil)
+
+	h := web.NewHandler(base.New(config.Default()))
+	h.Get("/post/{id:[0-9]+}", func(c *web.Context) error { return nil }).Name("post/view")
+
+	got, err := h.URLs().URL("post/view", url.P{"id": "9"})
+	if err != nil {
+		t.Fatalf("URL(post/view) error: %v", err)
+	}
+	if got != "/post/9" {
+		t.Errorf("URL = %q, want /post/9", got)
+	}
+
+	// Names absent from the table assemble by convention, like Yii2 Url::to.
+	got, err = h.URLs().URL("site/hello", url.P{"id": "1"})
+	if err != nil {
+		t.Fatalf("URL(site/hello) error: %v", err)
+	}
+	if got != "/site/hello?id=1" {
+		t.Errorf("URL = %q, want /site/hello?id=1 by convention", got)
+	}
+
+	// Wiring the table into the package default makes url.To resolve the
+	// same routes without a handle.
+	url.SetDefault(h.URLs())
+	if got := url.To("post/view", url.P{"id": "5"}); got != "/post/5" {
+		t.Errorf("url.To = %q, want /post/5", got)
+	}
+}
+
+func TestExplicitRouteBeatsConventionFallback(t *testing.T) {
+	app := base.New(config.Default())
+	if err := app.RegisterController("site", siteController{}); err != nil {
+		t.Fatalf("registering controller: %v", err)
+	}
+	h := web.NewHandler(app)
+	h.Get("/site/hello", func(c *web.Context) error {
+		return c.JSON(map[string]string{"from": "explicit"})
+	})
+
+	// The explicit binding wins over the identical convention route.
+	if got := source(t, h, "/site/hello"); got != "explicit" {
+		t.Errorf("explicit route lost to convention: from = %q", got)
+	}
+	// Actions without an explicit binding still resolve by convention.
+	if got := source(t, h, "/site/bye"); got != "bye-convention" {
+		t.Errorf("convention route missing: from = %q, want bye-convention", got)
+	}
+}
+
+func TestConventionFallbackDisabled(t *testing.T) {
+	app := base.New(config.Config{Web: config.Web{DisableConventionFallback: true}})
+	if err := app.RegisterController("site", siteController{}); err != nil {
+		t.Fatalf("registering controller: %v", err)
+	}
+	h := web.NewHandler(app)
+
+	res := do(t, h, "/site/hello", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 with the fallback disabled", res.StatusCode)
+	}
+
+	// Toggling at runtime brings the convention route back.
+	h.SetConventionFallback(true)
+	res = do(t, h, "/site/hello", "")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d after re-enabling, want 200", res.StatusCode)
+	}
+}
+
+func TestConventionFallbackModuleScopeAndIsolation(t *testing.T) {
+	h, _ := newConventionApp(t)
+
+	// Module controllers resolve under their prefix...
+	if got := source(t, h, "/admin/user/list"); got != "module-convention" {
+		t.Errorf("/admin/user/list from = %q, want module-convention", got)
+	}
+	// ...and root controllers at the root.
+	if got := source(t, h, "/site/hello"); got != "convention" {
+		t.Errorf("/site/hello from = %q, want convention", got)
+	}
+
+	// Isolation: neither registry leaks into the other scope.
+	for _, target := range []string{"/user/list", "/admin/site/hello"} {
+		if res := do(t, h, target, ""); res.StatusCode != http.StatusNotFound {
+			t.Errorf("%s status = %d, want 404 (scope isolation)", target, res.StatusCode)
+		}
+	}
+
+	// Unknown controller, unknown action and wrong segment counts all 404.
+	for _, target := range []string{"/admin/nobody/list", "/admin/user/missing", "/admin", "/admin/user", "/site/hello/extra"} {
+		if res := do(t, h, target, ""); res.StatusCode != http.StatusNotFound {
+			t.Errorf("%s status = %d, want 404", target, res.StatusCode)
+		}
+	}
+}
+
+func TestConventionRoutesServeAnyMethod(t *testing.T) {
+	h, _ := newConventionApp(t)
+
+	res := req(t, h, http.MethodPost, "/site/hello")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (convention routes are not method-bound)", res.StatusCode)
+	}
+}
+
+func TestConventionActionSignatureMismatchIsServerError(t *testing.T) {
+	app := base.New(config.Default())
+	if err := app.RegisterController("report", reportController{}); err != nil {
+		t.Fatalf("registering controller: %v", err)
+	}
+	h := web.NewHandler(app)
+
+	res := do(t, h, "/report/broken", "")
+	if res.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 for a wrong-signature action", res.StatusCode)
+	}
+}
+
+func TestMultiSegmentModulePrefixResolves(t *testing.T) {
+	app := base.New(config.Default())
+	api, err := base.NewModule(app, "/api")
+	if err != nil {
+		t.Fatalf("creating /api module: %v", err)
+	}
+	v1, err := base.NewModule(app, "/api/v1")
+	if err != nil {
+		t.Fatalf("creating /api/v1 module: %v", err)
+	}
+	if err := app.RegisterModule(api); err != nil {
+		t.Fatalf("registering /api module: %v", err)
+	}
+	if err := app.RegisterModule(v1); err != nil {
+		t.Fatalf("registering /api/v1 module: %v", err)
+	}
+	if err := api.RegisterController("user", userController{}); err != nil {
+		t.Fatalf("registering /api controller: %v", err)
+	}
+	if err := v1.RegisterController("site", siteController{}); err != nil {
+		t.Fatalf("registering /api/v1 controller: %v", err)
+	}
+	h := web.NewHandler(app)
+
+	// The longest matching prefix owns the path.
+	if got := source(t, h, "/api/v1/site/hello"); got != "convention" {
+		t.Errorf("/api/v1/site/hello from = %q, want the /api/v1 module to answer", got)
+	}
+	if got := source(t, h, "/api/user/list"); got != "module-convention" {
+		t.Errorf("/api/user/list from = %q, want the /api module to answer", got)
+	}
+	// The v1 registry is invisible under the shorter prefix.
+	if res := do(t, h, "/api/site/hello", ""); res.StatusCode != http.StatusNotFound {
+		t.Errorf("/api/site/hello status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestModuleScopedExplicitRoutes(t *testing.T) {
+	h, _ := newConventionApp(t)
+
+	admin, err := h.Module("/admin")
+	if err != nil {
+		t.Fatalf("Module(/admin) error: %v", err)
+	}
+	if _, err := h.Module("/ghost"); err == nil {
+		t.Error("Module under an unregistered prefix must error")
+	}
+
+	admin.Get("report/run", func(c *web.Context) error {
+		return c.JSON(map[string]string{"from": "module-explicit"})
+	}).Name("admin/report/run")
+	admin.Get("user/{id:[0-9]+}", func(c *web.Context) error {
+		id, err := c.ParamInt("id")
+		if err != nil {
+			return web.BadRequest(err.Error())
+		}
+		return c.JSON(map[string]any{"id": id})
+	}).Name("admin/user/view")
+
+	// Explicit mounts below the prefix answer and reverse by name.
+	if got := source(t, h, "/admin/report/run"); got != "module-explicit" {
+		t.Errorf("/admin/report/run from = %q, want module-explicit", got)
+	}
+	got, err := h.URLs().URL("admin/report/run", nil)
+	if err != nil || got != "/admin/report/run" {
+		t.Errorf("URL(admin/report/run) = %q, %v; want /admin/report/run", got, err)
+	}
+	got, err = h.URLs().URL("admin/user/view", url.P{"id": "9"})
+	if err != nil || got != "/admin/user/9" {
+		t.Errorf("URL(admin/user/view) = %q, %v; want /admin/user/9", got, err)
+	}
+
+	// Explicit patterns also win inside the module scope (without one,
+	// /admin/user/7 would resolve by convention into a missing action).
+	res := do(t, h, "/admin/user/7", "")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatalf("decoding body: %v", err)
+	}
+	if body["id"] != float64(7) {
+		t.Errorf("body = %v, want id 7", body)
+	}
+
+	// The same controller's convention route stays reachable.
+	if got := source(t, h, "/admin/user/list"); got != "module-convention" {
+		t.Errorf("/admin/user/list from = %q, want module-convention", got)
+	}
+}
+
+func TestUnmatchedPathsRenderNegotiatedNotFound(t *testing.T) {
+	h := web.NewHandler(base.New(config.Default()))
+
+	res := do(t, h, "/nope", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", res.StatusCode)
+	}
+	if ct := res.Header.Get("Content-Type"); ct != "application/json; charset=utf-8" {
+		t.Errorf("Content-Type = %q, want the negotiated JSON 404", ct)
+	}
+
+	res = do(t, h, "/a/b/c", "text/html")
+	if res.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", res.StatusCode)
+	}
+	if ct := res.Header.Get("Content-Type"); ct != "text/html; charset=utf-8" {
+		t.Errorf("Content-Type = %q, want the negotiated HTML 404", ct)
+	}
+}
+
+func TestRoutingOverRealServer(t *testing.T) {
+	h, _ := newConventionApp(t)
+	h.Get("/post/{id:[0-9]+}", func(c *web.Context) error {
+		id, err := c.ParamInt("id")
+		if err != nil {
+			return web.BadRequest(err.Error())
+		}
+		return c.JSON(map[string]any{"id": id})
+	}).Name("post/view")
+
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	// Explicit route with a typed parameter over real TCP.
+	res, err := http.Get(srv.URL + "/post/42")
+	if err != nil {
+		t.Fatalf("requesting /post/42: %v", err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d on /post/42, want 200", res.StatusCode)
+	}
+
+	// Convention fallback on the same server.
+	res, err = http.Get(srv.URL + "/site/hello")
+	if err != nil {
+		t.Fatalf("requesting /site/hello: %v", err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d on /site/hello, want 200", res.StatusCode)
+	}
+
+	// A regex miss falls through to the convention handler and 404s.
+	res, err = http.Get(srv.URL + "/post/abc")
+	if err != nil {
+		t.Fatalf("requesting /post/abc: %v", err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d on /post/abc, want 404", res.StatusCode)
+	}
+}

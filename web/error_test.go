@@ -43,19 +43,19 @@ func TestWantsJSON(t *testing.T) {
 		accept string
 		want   bool
 	}{
-		{"", true},                                    // absent header
-		{"*/*", true},                                 // wildcard only
-		{"application/json", true},                    // explicit JSON
-		{"application/vnd.api+json", true},            // structured JSON suffix
-		{"APPLICATION/JSON", true},                    // case-insensitive media type
-		{"text/html", false},                          // explicit HTML
-		{"application/xhtml+xml", false},              // XHTML
+		{"", true},                         // absent header
+		{"*/*", true},                      // wildcard only
+		{"application/json", true},         // explicit JSON
+		{"application/vnd.api+json", true}, // structured JSON suffix
+		{"APPLICATION/JSON", true},         // case-insensitive media type
+		{"text/html", false},               // explicit HTML
+		{"application/xhtml+xml", false},   // XHTML
 		{"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", false}, // browser default
-		{"application/json;q=0.8,text/html", false},   // HTML wins on quality
-		{"text/html;q=0.5,application/json;q=0.9", true}, // JSON wins on quality
-		{"application/xml,text/html;q=0.1", false},    // position tie-break: xml ignored, html matches
-		{"application/xml", true},                     // no known type pinned
-		{"garbage", true},                             // malformed header falls back to JSON
+		{"application/json;q=0.8,text/html", false},                                // HTML wins on quality
+		{"text/html;q=0.5,application/json;q=0.9", true},                           // JSON wins on quality
+		{"application/xml,text/html;q=0.1", false},                                 // position tie-break: xml ignored, html matches
+		{"application/xml", true},                                                  // no known type pinned
+		{"garbage", true},                                                          // malformed header falls back to JSON
 	}
 	for _, tc := range cases {
 		if got := wantsJSON(tc.accept); got != tc.want {

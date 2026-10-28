@@ -3,7 +3,9 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/goyii2/framework/base"
 )
@@ -41,6 +43,41 @@ func (c *Context) Response() http.ResponseWriter { return c.w }
 // StatusCode returns the status code written so far; before anything is
 // written it is 200 OK.
 func (c *Context) StatusCode() int { return c.w.status }
+
+// Param returns the value of the path parameter matched by the mounted
+// pattern's wildcard (e.g. "id" for "/post/{id:[0-9]+}"); parameters the
+// pattern does not declare return "".
+func (c *Context) Param(name string) string { return c.r.PathValue(name) }
+
+// ParamInt parses the path parameter as an int in base 10. Patterns with
+// digit-only wildcards still need this: values longer than the machine int
+// parse-fail and must reach the action as an error.
+func (c *Context) ParamInt(name string) (int, error) {
+	v, err := strconv.Atoi(c.Param(name))
+	if err != nil {
+		return 0, fmt.Errorf("web: path parameter %q: %w", name, err)
+	}
+	return v, nil
+}
+
+// ParamInt64 parses the path parameter as a 64-bit int in base 10.
+func (c *Context) ParamInt64(name string) (int64, error) {
+	v, err := strconv.ParseInt(c.Param(name), 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("web: path parameter %q: %w", name, err)
+	}
+	return v, nil
+}
+
+// ParamBool parses the path parameter as a boolean (strconv.ParseBool
+// syntax: 1, t, T, TRUE, true, True, 0, f, F, FALSE, false, False).
+func (c *Context) ParamBool(name string) (bool, error) {
+	v, err := strconv.ParseBool(c.Param(name))
+	if err != nil {
+		return false, fmt.Errorf("web: path parameter %q: %w", name, err)
+	}
+	return v, nil
+}
 
 // JSON writes v as the response body with an application/json content type.
 func (c *Context) JSON(v any) error {

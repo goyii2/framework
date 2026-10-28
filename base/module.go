@@ -42,9 +42,7 @@ type Module struct {
 	app    *Application
 	prefix string
 
-	mu          sync.RWMutex
-	controllers map[string]any
-	order       []string // registration order of controller ids
+	controllers controllerRegistry
 }
 
 // NewModule creates a module bound to app under the given route prefix. A
@@ -69,35 +67,59 @@ func (m *Module) Prefix() string { return m.prefix }
 // becomes the controller segment of conventional routes (e.g. "user" serves
 // /admin/user/<action>); duplicate ids are rejected.
 func (m *Module) RegisterController(id string, c any) error {
-	if id == "" || strings.Contains(id, "/") {
-		return ErrInvalidControllerID
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, ok := m.controllers[id]; ok {
-		return ErrDuplicateControllerID
-	}
-	if m.controllers == nil {
-		m.controllers = make(map[string]any)
-	}
-	m.controllers[id] = c
-	m.order = append(m.order, id)
-	return nil
+	return m.controllers.register(id, c)
 }
 
 // Controller returns the controller registered under id in this module.
 func (m *Module) Controller(id string) (any, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	c, ok := m.controllers[id]
-	return c, ok
+	return m.controllers.get(id)
 }
 
 // ControllerIDs returns the registered controller ids in registration order.
 func (m *Module) ControllerIDs() []string {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return append([]string(nil), m.order...)
+	return m.controllers.ids()
+}
+
+// controllerRegistry is the controller table shared by the application
+// (the root scope) and its modules: ids are unique per scope, kept in
+// registration order, and safe for concurrent use.
+type controllerRegistry struct {
+	mu          sync.RWMutex
+	controllers map[string]any
+	order       []string // registration order of controller ids
+}
+
+// register adds c under id after validating the id and its uniqueness.
+func (r *controllerRegistry) register(id string, c any) error {
+	if id == "" || strings.Contains(id, "/") {
+		return ErrInvalidControllerID
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.controllers[id]; ok {
+		return ErrDuplicateControllerID
+	}
+	if r.controllers == nil {
+		r.controllers = make(map[string]any)
+	}
+	r.controllers[id] = c
+	r.order = append(r.order, id)
+	return nil
+}
+
+// get returns the controller registered under id.
+func (r *controllerRegistry) get(id string) (any, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	c, ok := r.controllers[id]
+	return c, ok
+}
+
+// ids returns the registered controller ids in registration order.
+func (r *controllerRegistry) ids() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return append([]string(nil), r.order...)
 }
 
 // RegisterModule reserves sub-module registration: nesting modules under a

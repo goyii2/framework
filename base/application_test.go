@@ -98,6 +98,34 @@ func TestDefaultIsSingletonAndReplaceable(t *testing.T) {
 	}
 }
 
+func TestApplicationControllerRegistry(t *testing.T) {
+	app := New(config.Default())
+
+	if err := app.RegisterController("post", struct{}{}); err != nil {
+		t.Fatalf("registering controller: %v", err)
+	}
+	if err := app.RegisterController("post", struct{}{}); err != ErrDuplicateControllerID {
+		t.Errorf("duplicate registration error = %v, want ErrDuplicateControllerID", err)
+	}
+	if err := app.RegisterController("", struct{}{}); err != ErrInvalidControllerID {
+		t.Errorf("empty id error = %v, want ErrInvalidControllerID", err)
+	}
+	if err := app.RegisterController("a/b", struct{}{}); err != ErrInvalidControllerID {
+		t.Errorf("id containing '/' error = %v, want ErrInvalidControllerID", err)
+	}
+
+	c, ok := app.Controller("post")
+	if !ok || c == nil {
+		t.Error("Controller(post) did not return the registered controller")
+	}
+	if _, ok := app.Controller("missing"); ok {
+		t.Error("Controller(missing) must report not found")
+	}
+	if got := app.ControllerIDs(); len(got) != 1 || got[0] != "post" {
+		t.Errorf("ControllerIDs() = %v, want [post]", got)
+	}
+}
+
 // TestApplicationConcurrentUse exercises lazy initialization, component
 // replacement, context lookup and the package default from many goroutines;
 // run with -race.
