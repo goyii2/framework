@@ -52,8 +52,10 @@ type DB struct {
 
 // Cache holds the cache component values.
 type Cache struct {
-	Driver    string `yaml:"driver"` // memory | file | redis
-	KeyPrefix string `yaml:"keyPrefix"`
+	Driver    string `yaml:"driver"`    // memory | file | redis
+	KeyPrefix string `yaml:"keyPrefix"` // key namespace for the file and redis backends (memory is instance-local)
+	TTL       int    `yaml:"ttl"`       // seconds; default lifetime when a caller passes ttl <= 0
+	Path      string `yaml:"path"`      // file backend storage directory
 	Redis     Redis  `yaml:"redis"`
 }
 
@@ -134,6 +136,12 @@ func WithDefaults(cfg Config) Config {
 	}
 	if cfg.Cache.Driver == "" {
 		cfg.Cache.Driver = "memory"
+	}
+	if cfg.Cache.TTL == 0 {
+		cfg.Cache.TTL = 3600
+	}
+	if cfg.Cache.Path == "" {
+		cfg.Cache.Path = filepath.Join(os.TempDir(), "goyii-cache")
 	}
 	if cfg.Session.Name == "" {
 		cfg.Session.Name = "goyii-session"

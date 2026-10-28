@@ -5,6 +5,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/goyii2/framework/cache"
 	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/db"
 	"github.com/goyii2/framework/log"
@@ -17,11 +18,12 @@ import (
 // through the context (WithContext / FromContext); code without a request
 // context uses the package-level Default instance.
 type Application struct {
-	cfg     config.Config
-	log     *component[Log]
-	db      *db.Component
-	events  eventRegistry
-	modules moduleRegistry
+	cfg       config.Config
+	log       *component[Log]
+	db        *db.Component
+	cacheComp *component[cache.Cache]
+	events    eventRegistry
+	modules   moduleRegistry
 
 	controllers controllerRegistry
 }
@@ -43,9 +45,10 @@ func New(cfg config.Config) *Application {
 		}, slow)))
 	}
 	return &Application{
-		cfg: cfg,
-		log: logComp,
-		db:  db.NewComponent(cfg.DB, dbOpts...),
+		cfg:       cfg,
+		log:       logComp,
+		db:        db.NewComponent(cfg.DB, dbOpts...),
+		cacheComp: newComponent(func() cache.Cache { return newDefaultCache(cfg.Cache) }),
 	}
 }
 
