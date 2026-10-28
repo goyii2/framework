@@ -6,4 +6,7 @@
 // variable taking precedence when set. Versioned DDL (migrations) lives in
 // the migrate package and opens its own database/sql connection from the same
 // DSN; the two layers share configuration but not handles.
+//
+// The generic Active Record layer built on the connection lives in the
+// db/ar subpackage.
 package db
