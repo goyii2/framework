@@ -33,6 +33,12 @@ type Context struct {
 	// this request (read from the cookie or freshly generated); empty when
 	// the filter did not run or is disabled.
 	csrf string
+
+	// session is the request-scoped session the session middleware opened;
+	// user is the authentication state bound to it. Nil when the middleware
+	// did not run.
+	session *Session
+	user    *User
 }
 
 // ResponseFormat returns the response format negotiated for this request by
@@ -46,6 +52,17 @@ func (c *Context) ResponseFormat() string { return c.format }
 // Form rendering embeds it in the hidden field the filter verifies;
 // without the filter it returns "".
 func (c *Context) CsrfToken() string { return c.csrf }
+
+// Session returns the request-scoped session; nil when the session
+// middleware is not in the chain. The HTTP entry point installs it by
+// default, so applications assembling a custom chain are the nil case.
+func (c *Context) Session() *Session { return c.session }
+
+// User returns the request-scoped authentication state (the current
+// identity, Login/Logout); nil when the session middleware is not in the
+// chain. The stateless authentication middlewares install a session-less
+// User on demand, so identity-bearing code works either way.
+func (c *Context) User() *User { return c.user }
 
 // SetError records err as the request's outcome without writing a response
 // yet: the unified error renderer produces the final status, body and

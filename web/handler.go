@@ -33,6 +33,11 @@ type Handler struct {
 	// paths no explicit route matched; on by default, configurable off.
 	conventionFallback bool
 
+	// session is the session manager installed in the global chain; exposed
+	// for configuration (most notably wiring IdentityFinder) before serving
+	// traffic.
+	session *SessionManager
+
 	// chain holds the application-wide middleware, first registered
 	// outermost (first to see each request); pipe is the mux wrapped by it.
 	// The chain starts with the CSRF middleware unless configuration
@@ -50,8 +55,8 @@ type Handler struct {
 // NewHandler creates the HTTP entry point serving app. The convention
 // fallback follows the application configuration (on unless explicitly
 // disabled) and can be flipped later with SetConventionFallback. CSRF
-// validation is installed in the global chain unless the configuration
-// disables it (see Csrf).
+// validation and the session middleware are installed in the global chain
+// unless the configuration disables them (see Csrf and SessionManager).
 func NewHandler(app *base.Application) *Handler {
 	h := &Handler{
 		app:                app,
@@ -61,12 +66,19 @@ func NewHandler(app *base.Application) *Handler {
 		verbBindings:       map[string]*verbBinding{},
 	}
 	h.rebuildPipe()
+	h.session = NewSessionManager(app.Config().Session)
+	h.Use(h.session.Middleware())
 	if !app.Config().Web.DisableCsrf {
 		h.Use(Csrf{}.Middleware())
 	}
 	h.mountFallback()
 	return h
 }
+
+// SessionManager returns the session manager installed in the global chain.
+// Configure it (backend, cookie attributes, IdentityFinder) before serving
+// traffic; mutations during serving are not synchronized.
+func (h *Handler) SessionManager() *SessionManager { return h.session }
 
 // URLs returns this handler's named-route table. Install it as the
 // package-level default (url.SetDefault) to let url.To resolve this

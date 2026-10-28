@@ -1,5 +1,10 @@
 package config
 
+import (
+	"os"
+	"path/filepath"
+)
+
 // Config carries all framework configuration values. Sections grow with the
 // subsystems that consume them; unknown or absent values fall back to the
 // framework defaults (see WithDefaults).
@@ -61,6 +66,7 @@ type Log struct {
 type Session struct {
 	Name    string `yaml:"name"`    // session cookie name
 	Backend string `yaml:"backend"` // file | redis
+	Path    string `yaml:"path"`    // file backend storage directory
 	Timeout int    `yaml:"timeout"` // seconds
 	Redis   Redis  `yaml:"redis"`
 }
@@ -107,6 +113,9 @@ func WithDefaults(cfg Config) Config {
 	}
 	if cfg.Session.Backend == "" {
 		cfg.Session.Backend = "file"
+	}
+	if cfg.Session.Path == "" {
+		cfg.Session.Path = filepath.Join(os.TempDir(), "goyii-session")
 	}
 	if cfg.Session.Timeout == 0 {
 		cfg.Session.Timeout = 1440
