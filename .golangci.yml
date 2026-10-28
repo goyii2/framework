@@ -1,0 +1,12 @@
+version: "2"
+
+# 温和基线：仅启用 golangci-lint v2 官方默认 linter 集
+# （errcheck / govet / ineffassign / staticcheck / unused）与 gofmt
+# 格式检查；后续工单按需逐项加严。
+
+linters:
+  default: standard
+
+formatters:
+  enable:
+    - gofmt
