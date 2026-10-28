@@ -5,6 +5,7 @@ import (
 
 	"github.com/goyii2/framework/base"
 	"github.com/goyii2/framework/url"
+	"github.com/goyii2/framework/view"
 )
 
 // Handler is the application's HTTP entry point: it mounts controller
@@ -29,6 +30,10 @@ type Handler struct {
 
 	// urls is the named-route table powering reverse URL generation.
 	urls *url.Manager
+	// views is the named-view table powering Context.Render and the error
+	// page overrides; exposed for registration while assembling the
+	// application.
+	views *view.Registry
 	// conventionFallback enables /{controller}/{action} resolution for
 	// paths no explicit route matched; on by default, configurable off.
 	conventionFallback bool
@@ -62,6 +67,7 @@ func NewHandler(app *base.Application) *Handler {
 		app:                app,
 		mux:                http.NewServeMux(),
 		urls:               url.NewManager(),
+		views:              view.NewRegistry(),
 		conventionFallback: !app.Config().Web.DisableConventionFallback,
 		verbBindings:       map[string]*verbBinding{},
 	}
@@ -84,6 +90,12 @@ func (h *Handler) SessionManager() *SessionManager { return h.session }
 // package-level default (url.SetDefault) to let url.To resolve this
 // application's routes.
 func (h *Handler) URLs() *url.Manager { return h.urls }
+
+// Views returns this handler's view registry, the named-view table behind
+// Context.Render. Register the application's views while assembling, before
+// serving traffic; the names "error/<status>" and "error" override the
+// unified error handler's HTML pages.
+func (h *Handler) Views() *view.Registry { return h.views }
 
 // SetConventionFallback toggles /{controller}/{action} resolution for
 // paths no explicit route matched. Explicit routes are unaffected either
@@ -137,6 +149,7 @@ func (h *Handler) Handle(pattern string, action Action) {
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r = r.WithContext(h.app.WithContext(r.Context()))
 	c := newContext(h.app, w, r)
+	c.views = h.views
 
 	// Registered first so it runs last: afterRequest fires after panic
 	// recovery has rendered its error response.

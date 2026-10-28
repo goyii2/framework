@@ -1,0 +1,27 @@
+package view
+
+// menuList renders one level of the menu; nested items recurse below their
+// parent entry.
+templ menuList(items []MenuItem) {
+	<ul>
+		for _, item := range items {
+			if item.Active {
+				<li class="active">@menuEntry(item)</li>
+			} else {
+				<li>@menuEntry(item)</li>
+			}
+		}
+	</ul>
+}
+
+// menuEntry renders the label link and any nested level of one entry.
+templ menuEntry(item MenuItem) {
+	if item.URL == "" {
+		<span>{ item.Label }</span>
+	} else {
+		<a href={ templ.URL(item.URL) }>{ item.Label }</a>
+	}
+	if len(item.Items) > 0 {
+		@menuList(item.Items)
+	}
+}

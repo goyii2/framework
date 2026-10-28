@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/goyii2/framework/base"
+	"github.com/goyii2/framework/view"
 )
 
 // Context carries one HTTP request through the action pipeline: it exposes
@@ -39,6 +40,16 @@ type Context struct {
 	// did not run.
 	session *Session
 	user    *User
+
+	// views is the named-view table Context.Render resolves through; the
+	// owning Handler installs its registry, nil outside the pipeline.
+	views *view.Registry
+	// layout is the page frame override for the next render (nil means the
+	// built-in view.Shell); bare suppresses framing entirely (partial
+	// content); title is the page title layouts read.
+	layout view.Layout
+	bare   bool
+	title  string
 }
 
 // ResponseFormat returns the response format negotiated for this request by

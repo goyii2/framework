@@ -1,0 +1,20 @@
+package view
+
+// breadcrumbs renders the breadcrumb trail: linked stops separated by a
+// divider, the current stop unlinked and highlighted.
+templ breadcrumbs(links []Crumb) {
+	<ul class="breadcrumb">
+		for i, crumb := range links {
+			if crumb.URL == "" {
+				<li class="active">{ crumb.Label }</li>
+			} else {
+				<li>
+					<a href={ templ.URL(crumb.URL) }>{ crumb.Label }</a>
+					if i < len(links)-1 {
+						<span class="divider">/</span>
+					}
+				</li>
+			}
+		}
+	</ul>
+}

@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/goyii2/framework/base"
+	"github.com/goyii2/framework/view"
 )
 
 // Route is the registration handle returned by the method helpers; Name
@@ -84,6 +85,7 @@ func (h *Handler) route(method, path string, action Action) *Route {
 type ModuleRoutes struct {
 	h      *Handler
 	prefix string
+	layout view.Layout
 }
 
 // Module returns the route registrar scoped to the module registered under
@@ -95,30 +97,51 @@ func (h *Handler) Module(prefix string) (*ModuleRoutes, error) {
 	return &ModuleRoutes{h: h, prefix: strings.TrimRight(prefix, "/")}, nil
 }
 
+// Layout sets the page frame for the routes mounted below the module —
+// the module-level layout override. Call it before mounting the module's
+// routes (it applies to subsequently mounted actions); actions can still
+// override the frame per page with Context.SetLayout. Returns the registrar
+// so calls chain.
+func (m *ModuleRoutes) Layout(l view.Layout) *ModuleRoutes {
+	m.layout = l
+	return m
+}
+
+// wrap applies the module's layout to action, if one is set.
+func (m *ModuleRoutes) wrap(action Action) Action {
+	if m.layout == nil {
+		return action
+	}
+	return func(c *Context) error {
+		c.SetLayout(m.layout)
+		return action(c)
+	}
+}
+
 // Get mounts action on GET requests below the module prefix; path is
 // joined onto the prefix (a leading slash is optional).
 func (m *ModuleRoutes) Get(path string, action Action) *Route {
-	return m.h.route(http.MethodGet, m.join(path), action)
+	return m.h.route(http.MethodGet, m.join(path), m.wrap(action))
 }
 
 // Post mounts action on POST requests below the module prefix.
 func (m *ModuleRoutes) Post(path string, action Action) *Route {
-	return m.h.route(http.MethodPost, m.join(path), action)
+	return m.h.route(http.MethodPost, m.join(path), m.wrap(action))
 }
 
 // Put mounts action on PUT requests below the module prefix.
 func (m *ModuleRoutes) Put(path string, action Action) *Route {
-	return m.h.route(http.MethodPut, m.join(path), action)
+	return m.h.route(http.MethodPut, m.join(path), m.wrap(action))
 }
 
 // Delete mounts action on DELETE requests below the module prefix.
 func (m *ModuleRoutes) Delete(path string, action Action) *Route {
-	return m.h.route(http.MethodDelete, m.join(path), action)
+	return m.h.route(http.MethodDelete, m.join(path), m.wrap(action))
 }
 
 // Patch mounts action on PATCH requests below the module prefix.
 func (m *ModuleRoutes) Patch(path string, action Action) *Route {
-	return m.h.route(http.MethodPatch, m.join(path), action)
+	return m.h.route(http.MethodPatch, m.join(path), m.wrap(action))
 }
 
 // join resolves path below the module prefix.

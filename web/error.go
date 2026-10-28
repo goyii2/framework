@@ -9,6 +9,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/a-h/templ"
+	"github.com/goyii2/framework/view"
 )
 
 // HTTPError is an error carrying an HTTP status code and a safe,
@@ -132,11 +135,55 @@ func (h *Handler) renderError(c *Context, err error) {
 		_ = json.NewEncoder(c.w).Encode(errorBody{Name: name, Message: message, Status: status})
 		return
 	}
+	if comp, ok := h.errorView(c, status, name, message); ok {
+		if err := c.writeHTML(comp, status); err != nil {
+			h.app.Log().Error("error view rendering failed", append(logArgs, "err", err.Error())...)
+		}
+		return
+	}
 	c.w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	c.w.WriteHeader(status)
 	title := html.EscapeString(fmt.Sprintf("%d %s", status, name))
 	body := html.EscapeString(message)
 	_, _ = fmt.Fprintf(c.w, "<!DOCTYPE html><html><head><title>%s</title></head><body><h1>%s</h1><p>%s</p></body></html>", title, title, body)
+}
+
+// errorView resolves an HTML error page through the view registry: the
+// status-specific name "error/<status>" wins over the generic "error", and
+// no registration leaves the built-in minimal page in place. The override
+// runs through the same framing as normal pages, so custom error pages keep
+// the site's layout.
+func (h *Handler) errorView(c *Context, status int, name, message string) (comp templ.Component, ok bool) {
+	if c.views == nil {
+		return nil, false
+	}
+	data := view.ErrorData{Status: status, Name: name, Message: message}
+	for _, viewName := range []string{"error/" + strconv.Itoa(status), "error"} {
+		factory, found := c.views.Lookup(viewName)
+		if !found {
+			continue
+		}
+		// Error rendering already runs on failure paths (panics included),
+		// so a panicking factory degrades to the next candidate instead of
+		// taking the connection down.
+		produced := safeFactory(factory, data, h, viewName)
+		if produced == nil {
+			continue
+		}
+		return c.frame(produced), true
+	}
+	return nil, false
+}
+
+// safeFactory invokes a view factory, recovering a panic into a logged nil.
+func safeFactory(factory view.Factory, data view.ErrorData, h *Handler, viewName string) (comp templ.Component) {
+	defer func() {
+		if p := recover(); p != nil {
+			h.app.Log().Error("error view panicked", "view", viewName, "panic", p)
+			comp = nil
+		}
+	}()
+	return factory(data)
 }
 
 // wantsJSON decides the error format from an Accept header. Media ranges

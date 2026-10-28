@@ -1,0 +1,32 @@
+package view
+
+// Shell is the built-in layout frame: an HTML5 document with the page
+// title, the optional head/nav/footer slots and the action content in a
+// main element. It is the layout applied when no override is active; custom
+// layouts typically wrap or replace it.
+templ Shell(p Page) {
+	<!DOCTYPE html>
+	<html lang="en">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>{ p.Title }</title>
+			if p.Head != nil {
+				@p.Head
+			}
+		</head>
+		<body>
+			if p.Nav != nil {
+				@p.Nav
+			}
+			<main>
+				if p.Content != nil {
+					@p.Content
+				}
+			</main>
+			if p.Footer != nil {
+				@p.Footer
+			}
+		</body>
+	</html>
+}

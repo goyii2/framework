@@ -1,0 +1,25 @@
+package view
+
+// linkPager renders the LinkPager button list: step buttons, the numbered
+// window and optional jump-to-end buttons.
+templ linkPager(buttons []pagerButton) {
+	<ul class="pagination">
+		for _, b := range buttons {
+			if b.Class != "" {
+				<li class={ b.Class }>@pagerButtonContent(b)</li>
+			} else {
+				<li>@pagerButtonContent(b)</li>
+			}
+		}
+	</ul>
+}
+
+// pagerButtonContent renders one button's label: a disabled button renders
+// plain text, the rest render links.
+templ pagerButtonContent(b pagerButton) {
+	if b.Disabled {
+		<span>{ b.Label }</span>
+	} else {
+		<a href={ templ.URL(b.URL) }>{ b.Label }</a>
+	}
+}
