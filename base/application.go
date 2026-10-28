@@ -14,8 +14,10 @@ import (
 // through the context (WithContext / FromContext); code without a request
 // context uses the package-level Default instance.
 type Application struct {
-	cfg config.Config
-	log *component[Log]
+	cfg     config.Config
+	log     *component[Log]
+	events  eventRegistry
+	modules moduleRegistry
 }
 
 // New assembles an Application from cfg, filling zero values with framework
@@ -37,6 +39,31 @@ func (a *Application) Log() Log { return a.log.get() }
 // SetLog replaces the logging component (e.g. a test fake or a richer
 // implementation); nil restores lazy initialization of the default.
 func (a *Application) SetLog(l Log) { a.log.set(l) }
+
+// On subscribes h to the event name and returns a function that
+// unsubscribes it again (idempotent). Handlers run in registration order
+// when the event is triggered.
+func (a *Application) On(name EventName, h Handler) func() {
+	return a.events.on(name, h)
+}
+
+// Trigger dispatches the event name to all current subscribers, carrying the
+// request context ctx and the optional event-specific data (nil when the
+// event carries none).
+func (a *Application) Trigger(ctx context.Context, name EventName, data any) {
+	a.events.trigger(ctx, Event{Name: name, Data: data})
+}
+
+// RegisterModule adds m to the application's single-layer module registry so
+// the router can resolve its prefix. Module prefixes are unique and modules
+// must belong to this application.
+func (a *Application) RegisterModule(m *Module) error { return a.modules.register(a, m) }
+
+// Module returns the module registered under prefix.
+func (a *Application) Module(prefix string) (*Module, bool) { return a.modules.lookup(prefix) }
+
+// Modules returns all registered modules sorted by prefix.
+func (a *Application) Modules() []*Module { return a.modules.list() }
 
 // appKey is the unexported context key under which the application travels.
 type appKey struct{}
