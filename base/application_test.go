@@ -3,10 +3,13 @@ package base
 import (
 	"context"
 	"log/slog"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
 	"github.com/goyii2/framework/config"
+	"github.com/goyii2/framework/db"
 )
 
 func TestNewAssemblesApplication(t *testing.T) {
@@ -52,6 +55,68 @@ func TestApplicationSetLogFake(t *testing.T) {
 	app.SetLog(nil)
 	if _, ok := app.Log().(*defaultLog); !ok {
 		t.Error("SetLog(nil) must restore the default log component")
+	}
+}
+
+func TestApplicationDBComponent(t *testing.T) {
+	dsn := filepath.Join(t.TempDir(), "app.db")
+	app := New(config.Config{DB: config.DB{Driver: "sqlite", DSN: dsn}})
+
+	first, err := app.DB()
+	if err != nil {
+		t.Fatalf("first DB() error = %v", err)
+	}
+	if err := first.Exec("CREATE TABLE app_demo (id INTEGER PRIMARY KEY)").Error; err != nil {
+		t.Fatalf("create table through the application connection: %v", err)
+	}
+	again, err := app.DB()
+	if err != nil {
+		t.Fatalf("second DB() error = %v", err)
+	}
+	if again != first {
+		t.Error("repeated DB() returned a different connection")
+	}
+
+	replacement, err := db.Connect(config.DB{Driver: "sqlite", DSN: dsn})
+	if err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+	app.SetDB(replacement)
+	if got, _ := app.DB(); got != replacement {
+		t.Error("SetDB must replace the connection")
+	}
+
+	app.SetDB(nil)
+	fresh, err := app.DB()
+	if err != nil {
+		t.Fatalf("DB() after SetDB(nil) error = %v", err)
+	}
+	if fresh == replacement {
+		t.Error("SetDB(nil) must restore lazy initialization from the configuration")
+	}
+	var count int64
+	if err := fresh.Raw("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'app_demo'").Scan(&count).Error; err != nil {
+		t.Fatalf("querying the re-opened connection: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("table app_demo visible through re-opened connection: count = %d, want 1", count)
+	}
+
+	// Release every connection the component held so Windows can remove the
+	// temporary database file.
+	_ = first.Close()
+	_ = replacement.Close()
+	_ = fresh.Close()
+}
+
+func TestApplicationDBWithoutDSNFailsWithConfigHint(t *testing.T) {
+	app := New(config.Config{})
+	_, err := app.DB()
+	if err == nil {
+		t.Fatal("DB() without a DSN returned nil error")
+	}
+	if !strings.Contains(err.Error(), db.DSNEnvVar) {
+		t.Errorf("error %q must name the %s fallback", err, db.DSNEnvVar)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"sync/atomic"
 
 	"github.com/goyii2/framework/config"
+	"github.com/goyii2/framework/db"
 )
 
 // Application is the process-level component container. Components are
@@ -16,6 +17,7 @@ import (
 type Application struct {
 	cfg     config.Config
 	log     *component[Log]
+	db      *db.Component
 	events  eventRegistry
 	modules moduleRegistry
 
@@ -29,6 +31,7 @@ func New(cfg config.Config) *Application {
 	return &Application{
 		cfg: cfg,
 		log: newComponent(func() Log { return newDefaultLog(cfg.Log) }),
+		db:  db.NewComponent(cfg.DB),
 	}
 }
 
@@ -41,6 +44,15 @@ func (a *Application) Log() Log { return a.log.get() }
 // SetLog replaces the logging component (e.g. a test fake or a richer
 // implementation); nil restores lazy initialization of the default.
 func (a *Application) SetLog(l Log) { a.log.set(l) }
+
+// DB returns the database connection component, opening it on first access.
+// The connection comes from the configuration's db section; a failed open
+// returns the error and is retried on the next call.
+func (a *Application) DB() (*db.Conn, error) { return a.db.Get() }
+
+// SetDB replaces the database connection (e.g. a test fake or a pre-opened
+// connection); nil restores lazy initialization from the configuration.
+func (a *Application) SetDB(c *db.Conn) { a.db.Set(c) }
 
 // On subscribes h to the event name and returns a function that
 // unsubscribes it again (idempotent). Handlers run in registration order
