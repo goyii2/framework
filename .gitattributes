@@ -1,0 +1,3 @@
+# Go sources must stay LF: gofmt (and the lint gofmt check) reject CRLF,
+# and core.autocrlf=true checkouts would otherwise reintroduce it.
+*.go text eol=lf
