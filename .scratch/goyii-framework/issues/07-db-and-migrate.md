@@ -1,6 +1,6 @@
 # 07: DB 组件 + yiimigrate 并入
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 **What to build:** 数据库接入（ADR-0004）：GORM 连接作为 db 组件懒初始化（DSN 来自应用配置，兼容 DB_DSN 环境变量）；yiimigrate 源码并入 migrate 包，保持 database/sql 直连、不引 ORM 的原架构；`goyii migrate` 暴露八命令（up/down/redo/history/new/mark/to/create），历史表、方言锁、dry-run 按原语义。
 
