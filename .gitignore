@@ -12,3 +12,6 @@
 .idea/
 .vscode/
 Thumbs.db
+
+# Example runtime state (sqlite db, logs, sessions, cache)
+examples/basic/runtime/

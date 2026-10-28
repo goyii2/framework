@@ -2,8 +2,10 @@ package console
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -99,6 +101,18 @@ func (c *Console) Execute() error { return c.ExecuteContext(context.Background()
 // application is attached to that context, so inside any command
 // base.FromContext(cmd.Context()) reaches the console's application instead
 // of the package-level default.
+//
+// Once the root command has finished — serve drained its in-flight requests,
+// migrate and user commands completed — the application's log targets are
+// released through Logger.Close. This is the single process-shutdown hook for
+// the logging component: file targets flush their handles no matter which
+// command ran, and a foreign minimal logger installed via SetLog is unaffected
+// (the wrapper holds no targets). A close failure is reported on stderr; the
+// command's own outcome is returned unchanged.
 func (c *Console) ExecuteContext(ctx context.Context) error {
-	return c.root.ExecuteContext(c.app.WithContext(ctx))
+	err := c.root.ExecuteContext(c.app.WithContext(ctx))
+	if cerr := c.app.Logger().Close(); cerr != nil {
+		fmt.Fprintf(os.Stderr, "goyii: closing log targets: %v\n", cerr)
+	}
+	return err
 }

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/goyii2/framework/base"
 	"github.com/goyii2/framework/config"
+	"github.com/goyii2/framework/log"
 	"github.com/goyii2/framework/web"
 )
 
@@ -351,5 +353,36 @@ func TestServeWithoutHandlerReportsSetupError(t *testing.T) {
 	err := c.Execute()
 	if err == nil || !strings.Contains(err.Error(), "no HTTP handler") {
 		t.Fatalf("error = %v, want missing-handler setup error", err)
+	}
+}
+
+// TestExecuteClosesLogTargets pins the process-shutdown hook: whatever
+// command ran, the console releases the application's log targets afterwards.
+// A file target that was closed reports every further write, which is exactly
+// what the assertion observes.
+func TestExecuteClosesLogTargets(t *testing.T) {
+	target, err := log.NewFileTarget(filepath.Join(t.TempDir(), "app.log"), 1<<20, 5)
+	if err != nil {
+		t.Fatalf("open file target: %v", err)
+	}
+	app := base.New(config.Default())
+	app.SetLog(log.New(slog.LevelInfo, target))
+
+	ran := false
+	c := New(app)
+	c.AddCommand(&cobra.Command{
+		Use: "noop",
+		Run: func(*cobra.Command, []string) { ran = true },
+	})
+	c.Command().SetArgs([]string{"noop"})
+	c.Command().SetErr(io.Discard)
+	if err := c.Execute(); err != nil {
+		t.Fatalf("execute noop: %v", err)
+	}
+	if !ran {
+		t.Fatal("noop command did not run")
+	}
+	if werr := target.Write(log.Record{Message: "after shutdown"}); werr == nil || !strings.Contains(werr.Error(), "closed") {
+		t.Errorf("write after Execute = %v, want the closed-target error", werr)
 	}
 }

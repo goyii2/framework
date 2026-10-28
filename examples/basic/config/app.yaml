@@ -1,0 +1,44 @@
+# goyii basic example — configuration values only; behavior is assembled in
+# main.go (code owns behavior, yaml owns values).
+#
+# Every value below can be overridden through the matching environment
+# variable (field path upper-cased): DB_DSN, WEB_LISTEN, CACHE_PATH,
+# SESSION_PATH, APP_DEBUG, ...
+app:
+  name: basic
+  debug: true
+
+web:
+  listen: "127.0.0.1:8090"
+  # The example serves a JSON API plus CSRF-protected write requests, so the
+  # convention fallback and CSRF validation both stay enabled (defaults).
+
+db:
+  driver: sqlite
+  dsn: runtime/basic.sqlite # file created by `goyii migrate up`
+
+cache:
+  driver: file
+  path: runtime/cache
+
+session:
+  backend: file
+  path: runtime/session
+
+log:
+  level: debug
+  targets:
+    # Human-facing console: info and up, without query noise.
+    - type: console
+      minLevel: info
+      except: ["db"]
+    # Observability file: every database record (queries, slow queries) plus
+    # the application's cache events land here.
+    - type: file
+      path: runtime/app.log
+      minLevel: debug
+      categories: ["db*", "cache"]
+  gorm:
+    # Demo threshold set low on purpose so ordinary queries already surface
+    # as slow-query warnings in the file target.
+    slowThresholdMs: 1
