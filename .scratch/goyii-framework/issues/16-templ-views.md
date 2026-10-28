@@ -1,6 +1,6 @@
 # 16: templ 视图层
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 **What to build:** 视图层（PRD P1）：视图注册表——`ctx.Render("post/view", data)` 按名查表（map 查找零反射），亦支持直传 templ 组件；Layout 以组件组合实现（模块级/页面级可覆盖）；Widget 最小集四件（LinkPager/Breadcrumbs/Menu/DetailView）。不做 AssetManager（PRD 放弃清单，替代路径在 P2）。
 
