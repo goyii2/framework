@@ -3,6 +3,7 @@ package base
 import (
 	"context"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/db"
+	"github.com/goyii2/framework/log"
 )
 
 func TestNewAssemblesApplication(t *testing.T) {
@@ -53,7 +55,7 @@ func TestApplicationSetLogFake(t *testing.T) {
 	}
 
 	app.SetLog(nil)
-	if _, ok := app.Log().(*defaultLog); !ok {
+	if _, ok := app.Log().(*log.Logger); !ok {
 		t.Error("SetLog(nil) must restore the default log component")
 	}
 }
@@ -160,6 +162,100 @@ func TestDefaultIsSingletonAndReplaceable(t *testing.T) {
 	SetDefault(app)
 	if Default() != app {
 		t.Error("SetDefault must install the given application as the package default")
+	}
+}
+
+func TestApplicationLoggerReturnsRichComponent(t *testing.T) {
+	app := New(config.Default())
+
+	l := app.Logger()
+	if l == nil {
+		t.Fatal("Logger() returned nil")
+	}
+	if app.Log() != l {
+		t.Error("Log() and Logger() must expose the same component instance")
+	}
+
+	// A foreign minimal implementation is wrapped, not lost: delivery still
+	// reaches it under the full API.
+	fake := &countingLog{}
+	app.SetLog(fake)
+	wrapped := app.Logger()
+	if wrapped == l {
+		t.Error("SetLog must be reflected by Logger()")
+	}
+	wrapped.Category("web").Info("wrapped call")
+	if calls := fake.snapshot(); len(calls) != 1 || calls[0] != "info:wrapped call" {
+		t.Errorf("wrapped logger calls = %v, want [info:wrapped call]", calls)
+	}
+}
+
+func TestApplicationGormQueryLoggingEnabledByDefault(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "db.log")
+	app := New(config.Config{
+		DB: config.DB{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "app.db")},
+		Log: config.Log{
+			Level:   "debug",
+			Targets: []config.LogTarget{{Type: "file", Path: logPath}},
+		},
+	})
+
+	conn, err := app.DB()
+	if err != nil {
+		t.Fatalf("DB(): %v", err)
+	}
+	// Release the log file before the temp dir cleanup so Windows can
+	// remove it; registered first, runs last.
+	t.Cleanup(func() { _ = app.Logger().Close() })
+	t.Cleanup(func() { _ = conn.Close() })
+	if err := conn.Exec("CREATE TABLE gorm_log_demo (id INTEGER PRIMARY KEY)").Error; err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	if err := conn.Exec("INSERT INTO gorm_log_demo (id) VALUES (1)").Error; err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("reading log file: %v", err)
+	}
+	if !strings.Contains(string(data), "[db] query") || !strings.Contains(string(data), "INSERT INTO gorm_log_demo") {
+		t.Errorf("queries must be logged under the db category, got:\n%s", data)
+	}
+}
+
+func TestApplicationGormQueryLoggingDisabled(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "db-off.log")
+	app := New(config.Config{
+		DB: config.DB{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "off.db")},
+		Log: config.Log{
+			Level:   "debug",
+			Targets: []config.LogTarget{{Type: "file", Path: logPath}},
+			Gorm:    config.GormLog{Disable: true},
+		},
+	})
+
+	conn, err := app.DB()
+	if err != nil {
+		t.Fatalf("DB(): %v", err)
+	}
+	t.Cleanup(func() { _ = app.Logger().Close() })
+	t.Cleanup(func() { _ = conn.Close() })
+	if err := conn.Exec("CREATE TABLE gorm_log_off (id INTEGER PRIMARY KEY)").Error; err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	// With the adapter off nothing reaches the targets: the log file may
+	// not even exist; when it does, it must be free of db records.
+	data, err := os.ReadFile(logPath)
+	if os.IsNotExist(err) {
+		return
+	}
+	if err != nil {
+		t.Fatalf("reading log file: %v", err)
+	}
+	if strings.Contains(string(data), "[db]") {
+		t.Errorf("disabled adapter must keep db records out of the targets, got:\n%s", data)
 	}
 }
 

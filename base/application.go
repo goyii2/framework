@@ -3,9 +3,11 @@ package base
 import (
 	"context"
 	"sync/atomic"
+	"time"
 
 	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/db"
+	"github.com/goyii2/framework/log"
 )
 
 // Application is the process-level component container. Components are
@@ -25,13 +27,25 @@ type Application struct {
 }
 
 // New assembles an Application from cfg, filling zero values with framework
-// defaults. Component construction is deferred to first access.
+// defaults. Component construction is deferred to first access. Unless the
+// log configuration disables it, the database connection is opened with the
+// GORM query logging adapter routing queries, slow queries and errors into
+// the log component (category "db").
 func New(cfg config.Config) *Application {
 	cfg = config.WithDefaults(cfg)
+	logComp := newComponent(func() Log { return newDefaultLog(cfg.Log) })
+
+	var dbOpts []db.Option
+	if !cfg.Log.Gorm.Disable {
+		slow := time.Duration(cfg.Log.Gorm.SlowThresholdMs) * time.Millisecond
+		dbOpts = append(dbOpts, db.WithGormLogger(db.NewGormLogger(func() *log.Logger {
+			return loggerOf(logComp)
+		}, slow)))
+	}
 	return &Application{
 		cfg: cfg,
-		log: newComponent(func() Log { return newDefaultLog(cfg.Log) }),
-		db:  db.NewComponent(cfg.DB),
+		log: logComp,
+		db:  db.NewComponent(cfg.DB, dbOpts...),
 	}
 }
 
@@ -40,6 +54,12 @@ func (a *Application) Config() config.Config { return a.cfg }
 
 // Log returns the logging component, initializing it on first access.
 func (a *Application) Log() Log { return a.log.get() }
+
+// Logger returns the logging component under its full API (category
+// scoping, target management, profiling). It is the concrete default
+// implementation; a foreign component installed via SetLog is wrapped, with
+// delivery forwarded to it.
+func (a *Application) Logger() *log.Logger { return loggerOf(a.log) }
 
 // SetLog replaces the logging component (e.g. a test fake or a richer
 // implementation); nil restores lazy initialization of the default.

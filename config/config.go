@@ -59,7 +59,31 @@ type Cache struct {
 
 // Log holds the logging component values.
 type Log struct {
-	Level string `yaml:"level"` // debug | info | warn | error
+	Level   string      `yaml:"level"` // debug | info | warn | error
+	Targets []LogTarget `yaml:"targets"`
+	Gorm    GormLog     `yaml:"gorm"`
+}
+
+// LogTarget configures one log target. Type selects the built-in sink
+// (console | file); the remaining values are delivery rules applied by the
+// dispatcher before the sink sees a record.
+type LogTarget struct {
+	Type       string   `yaml:"type"`       // console | file
+	MinLevel   string   `yaml:"minLevel"`   // debug | info | warn | error
+	Categories []string `yaml:"categories"` // include patterns ("web", "db*", "*"); empty = all
+	Except     []string `yaml:"except"`     // exclude patterns; win over categories
+
+	// File target values.
+	Path      string `yaml:"path"`      // log file path
+	MaxSizeMB int    `yaml:"maxSizeMB"` // rotate when the file exceeds this size
+	MaxFiles  int    `yaml:"maxFiles"`  // rotated files kept on disk
+}
+
+// GormLog holds the values of the database query logging adapter, which
+// routes GORM's logger callbacks into the framework log component.
+type GormLog struct {
+	Disable         bool `yaml:"disable"`         // true turns the adapter off (GORM default stdout logger)
+	SlowThresholdMs int  `yaml:"slowThresholdMs"` // queries at or above this duration log as slow
 }
 
 // Session holds the session component values.
@@ -104,6 +128,9 @@ func WithDefaults(cfg Config) Config {
 	}
 	if cfg.Log.Level == "" {
 		cfg.Log.Level = "info"
+	}
+	if cfg.Log.Gorm.SlowThresholdMs == 0 {
+		cfg.Log.Gorm.SlowThresholdMs = 200
 	}
 	if cfg.Cache.Driver == "" {
 		cfg.Cache.Driver = "memory"

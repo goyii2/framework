@@ -149,3 +149,76 @@ func TestLoadEnvMissingFilesFail(t *testing.T) {
 		t.Fatal("loading from a directory without config files must fail")
 	}
 }
+
+func TestLoadLogSection(t *testing.T) {
+	dir := t.TempDir()
+	appYAML := `
+app:
+  name: logdemo
+log:
+  level: debug
+  targets:
+    - type: console
+      minLevel: warn
+      categories: ["web*", "db"]
+      except: ["web/session"]
+    - type: file
+      path: logs/app.log
+      maxSizeMB: 20
+      maxFiles: 7
+  gorm:
+    slowThresholdMs: 500
+`
+	if err := os.WriteFile(filepath.Join(dir, "app.yaml"), []byte(appYAML), 0o644); err != nil {
+		t.Fatalf("writing app.yaml: %v", err)
+	}
+
+	cfg, err := LoadEnv(dir, "dev")
+	if err != nil {
+		t.Fatalf("LoadEnv: %v", err)
+	}
+
+	if cfg.Log.Level != "debug" {
+		t.Errorf("Log.Level = %q, want %q", cfg.Log.Level, "debug")
+	}
+	if len(cfg.Log.Targets) != 2 {
+		t.Fatalf("Log.Targets = %+v, want 2 entries", cfg.Log.Targets)
+	}
+
+	console := cfg.Log.Targets[0]
+	if console.Type != "console" || console.MinLevel != "warn" {
+		t.Errorf("console target = %+v", console)
+	}
+	if strings.Join(console.Categories, ",") != "web*,db" {
+		t.Errorf("console categories = %v", console.Categories)
+	}
+	if len(console.Except) != 1 || console.Except[0] != "web/session" {
+		t.Errorf("console except = %v", console.Except)
+	}
+
+	file := cfg.Log.Targets[1]
+	if file.Type != "file" || file.Path != "logs/app.log" || file.MaxSizeMB != 20 || file.MaxFiles != 7 {
+		t.Errorf("file target = %+v", file)
+	}
+
+	if cfg.Log.Gorm.Disable {
+		t.Error("gorm adapter must be enabled by default")
+	}
+	if cfg.Log.Gorm.SlowThresholdMs != 500 {
+		t.Errorf("gorm slow threshold = %d, want 500", cfg.Log.Gorm.SlowThresholdMs)
+	}
+}
+
+func TestLogDefaults(t *testing.T) {
+	cfg := WithDefaults(Config{})
+
+	if cfg.Log.Gorm.SlowThresholdMs != 200 {
+		t.Errorf("default gorm slow threshold = %d, want 200", cfg.Log.Gorm.SlowThresholdMs)
+	}
+	if cfg.Log.Gorm.Disable {
+		t.Error("the gorm adapter must default to enabled")
+	}
+	if len(cfg.Log.Targets) != 0 {
+		t.Errorf("WithDefaults must not invent targets, got %+v", cfg.Log.Targets)
+	}
+}
