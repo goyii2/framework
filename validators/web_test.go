@@ -86,7 +86,9 @@ func newValidationApp(t *testing.T) (*web.Handler, *base.Application) {
 	).Error; err != nil {
 		t.Fatalf("create table: %v", err)
 	}
-	app := base.New(config.Config{})
+	// A pure JSON API endpoint: CSRF cookie validation is off (the exact
+	// configuration switch this application shape is meant to use).
+	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}})
 	app.SetDB(conn)
 	handler := web.NewHandler(app)
 	handler.Post("/user", userController{}.ActionCreate)

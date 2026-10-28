@@ -5,9 +5,14 @@ package web
 //	type PostController struct{ web.Controller }
 //
 // Handler methods named with the Action prefix (ActionView, ActionDelete)
-// turn the struct into a controller whose methods are routable actions.
-// Capabilities grow with the routing and view layers; at this stage the
-// type marks controller classes and reserves the embedding slot.
+// turn the struct into a controller whose methods are routable actions. A
+// controller may optionally declare middleware by implementing
+//
+//	Middleware() []Middleware
+//
+// — it then wraps only that controller's actions, mounted explicitly
+// through Handler.Ctrl or resolved by the convention fallback, and runs
+// after the application-wide chain (see middleware.go).
 type Controller struct{}
 
 // Action is the controller action signature: it receives the request

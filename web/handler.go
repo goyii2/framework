@@ -15,11 +15,14 @@ import (
 //	h.Get("/post/{id:[0-9]+}", postCtrl.ActionView).Name("post/view")
 //	http.ListenAndServe(app.Config().Web.Listen, h)
 //
-// Per request the pipeline is: trigger EventBeforeRequest, dispatch to the
-// mounted action with a fresh Context carrying the application, render any
-// returned error (format negotiated from Accept, panics recovered as 500),
-// then trigger EventAfterRequest. Requests no explicit pattern matches
-// land on the convention fallback (see router.go).
+// Per request the pipeline is: trigger EventBeforeRequest, run the global
+// middleware chain around routing, dispatch to the mounted action with a
+// fresh Context carrying the application (wrapped with the controller's
+// middleware when mounted through Ctrl or resolved by convention), render
+// any returned error (format negotiated from Accept, panics recovered as
+// 500), then trigger EventAfterRequest. Requests no explicit pattern
+// matches land on the convention fallback (see router.go); a path bound
+// explicitly under other verbs answers 405 with Allow first.
 type Handler struct {
 	app *base.Application
 	mux *http.ServeMux
@@ -29,17 +32,37 @@ type Handler struct {
 	// conventionFallback enables /{controller}/{action} resolution for
 	// paths no explicit route matched; on by default, configurable off.
 	conventionFallback bool
+
+	// chain holds the application-wide middleware, first registered
+	// outermost (first to see each request); pipe is the mux wrapped by it.
+	// The chain starts with the CSRF middleware unless configuration
+	// disables it.
+	chain []Middleware
+	pipe  http.Handler
+
+	// verbBindings remembers the path patterns mounted explicitly with the
+	// verbs bound to each, so a request hitting a bound path with an
+	// unbound verb can be answered 405 + Allow instead of silently falling
+	// through to the convention routes.
+	verbBindings map[string]*verbBinding
 }
 
 // NewHandler creates the HTTP entry point serving app. The convention
 // fallback follows the application configuration (on unless explicitly
-// disabled) and can be flipped later with SetConventionFallback.
+// disabled) and can be flipped later with SetConventionFallback. CSRF
+// validation is installed in the global chain unless the configuration
+// disables it (see Csrf).
 func NewHandler(app *base.Application) *Handler {
 	h := &Handler{
 		app:                app,
 		mux:                http.NewServeMux(),
 		urls:               url.NewManager(),
 		conventionFallback: !app.Config().Web.DisableConventionFallback,
+		verbBindings:       map[string]*verbBinding{},
+	}
+	h.rebuildPipe()
+	if !app.Config().Web.DisableCsrf {
+		h.Use(Csrf{}.Middleware())
 	}
 	h.mountFallback()
 	return h
@@ -64,6 +87,7 @@ func (h *Handler) SetConventionFallback(enabled bool) { h.conventionFallback = e
 // expandWildcards).
 func (h *Handler) Handle(pattern string, action Action) {
 	clean, constraints := expandWildcards(pattern)
+	h.recordVerbs(pattern, constraints)
 	h.mux.HandleFunc(clean, func(w http.ResponseWriter, r *http.Request) {
 		c := FromContext(r.Context())
 		if c == nil {
@@ -91,11 +115,13 @@ func (h *Handler) Handle(pattern string, action Action) {
 
 // ServeHTTP runs the request pipeline around the mounted actions: create
 // the request Context (carrying the application), trigger
-// EventBeforeRequest, dispatch, render any returned error (format
-// negotiated from Accept, panics recovered as 500), then trigger
-// EventAfterRequest with the final response status. Requests no pattern
-// matches are finished by the convention-fallback handler, so every miss
-// renders a negotiated 404 instead of the ServeMux default page.
+// EventBeforeRequest, run the global middleware chain around routing,
+// render any returned error (format negotiated from Accept, panics
+// recovered as 500), then trigger EventAfterRequest with the final response
+// status. Requests no pattern matches are finished by the
+// convention-fallback handler, so every miss renders a negotiated 404 —
+// except paths explicitly bound under other verbs, which answer 405 with an
+// Allow header.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r = r.WithContext(h.app.WithContext(r.Context()))
 	c := newContext(h.app, w, r)
@@ -111,7 +137,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	h.app.Trigger(c.r.Context(), base.EventBeforeRequest, nil)
-	h.mux.ServeHTTP(c.w, c.r)
+	h.pipe.ServeHTTP(c.w, c.r)
 	if c.err != nil {
 		h.renderError(c, c.err)
 	}

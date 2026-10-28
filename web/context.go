@@ -23,7 +23,35 @@ type Context struct {
 	// can bubble it up to the pipeline without changing http.Handler
 	// signatures.
 	err error
+
+	// format is the response format the ContentNegotiator middleware
+	// negotiated for this request ("json", "html", ...); empty means no
+	// negotiation ran and error rendering falls back to Accept sniffing.
+	format string
+
+	// csrf is the double-submit token the Csrf middleware established for
+	// this request (read from the cookie or freshly generated); empty when
+	// the filter did not run or is disabled.
+	csrf string
 }
+
+// ResponseFormat returns the response format negotiated for this request by
+// the ContentNegotiator middleware ("" when none ran). Unified error
+// rendering honors it: "html" renders the HTML error page, any other
+// negotiated value renders JSON.
+func (c *Context) ResponseFormat() string { return c.format }
+
+// CsrfToken returns the CSRF token active for this request: the value the
+// Csrf middleware read from (or issued into) the double-submit cookie.
+// Form rendering embeds it in the hidden field the filter verifies;
+// without the filter it returns "".
+func (c *Context) CsrfToken() string { return c.csrf }
+
+// SetError records err as the request's outcome without writing a response
+// yet: the unified error renderer produces the final status, body and
+// format once the middleware chain unwinds. It is the rejection path for
+// middleware — record the error and return without calling next.
+func (c *Context) SetError(err error) { c.err = err }
 
 // App returns the application serving this request.
 func (c *Context) App() *base.Application { return c.app }

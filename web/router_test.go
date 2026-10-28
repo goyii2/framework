@@ -45,10 +45,12 @@ type reportController struct {
 func (reportController) ActionBroken(c *web.Context, extra string) error { return nil }
 
 // newConventionApp assembles an application with one root controller and
-// one /admin module controller for convention-fallback tests.
+// one /admin module controller for convention-fallback tests. CSRF is off:
+// these tests exercise routing, not form-token mechanics (covered by the
+// filter tests).
 func newConventionApp(t *testing.T) (*web.Handler, *base.Application) {
 	t.Helper()
-	app := base.New(config.Default())
+	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}})
 	if err := app.RegisterController("site", siteController{}); err != nil {
 		t.Fatalf("registering root controller: %v", err)
 	}
@@ -167,7 +169,7 @@ func TestTypedParamParseFailureBecomesBadRequest(t *testing.T) {
 }
 
 func TestMethodHelpersAndMethodMismatch(t *testing.T) {
-	h := web.NewHandler(base.New(config.Default()))
+	h := web.NewHandler(base.New(config.Config{Web: config.Web{DisableCsrf: true}}))
 	h.Get("/thing", func(c *web.Context) error { return c.JSON(map[string]string{"m": "get"}) })
 	h.Post("/thing", func(c *web.Context) error { return c.JSON(map[string]string{"m": "post"}) })
 
@@ -178,12 +180,45 @@ func TestMethodHelpersAndMethodMismatch(t *testing.T) {
 		t.Errorf("POST /thing = %q, want post", got)
 	}
 
-	// The convention catch-all matches every method, so a wrong-verb
-	// request falls through to it instead of a bare 405: /thing resolves
-	// nowhere by convention, hence 404. Verbs are a filter concern.
+	// A verb no explicit binding accepts is a verb mismatch, not a routing
+	// miss: the handler answers 405 with the bound verbs in Allow instead
+	// of silently falling through to the convention fallback.
 	res := req(t, h, http.MethodPut, "/thing")
-	if res.StatusCode != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404 via the convention fallback", res.StatusCode)
+	if res.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want 405", res.StatusCode)
+	}
+	if allow := res.Header.Get("Allow"); allow != "GET, POST" {
+		t.Errorf("Allow = %q, want \"GET, POST\"", allow)
+	}
+}
+
+func TestExplicitRouteVerbMismatch405(t *testing.T) {
+	h := web.NewHandler(base.New(config.Config{Web: config.Web{DisableCsrf: true}}))
+	h.Get("/post/{id:[0-9]+}", func(c *web.Context) error {
+		return c.JSON(map[string]string{"m": "get"})
+	})
+	h.Handle("/any", func(c *web.Context) error { // any-method binding
+		return c.JSON(map[string]string{"m": "any"})
+	})
+
+	// Wrong verb on a bound wildcard path: 405 naming the bound verb.
+	res := req(t, h, http.MethodPut, "/post/42")
+	if res.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("PUT /post/42 status = %d, want 405", res.StatusCode)
+	}
+	if allow := res.Header.Get("Allow"); allow != "GET" {
+		t.Errorf("Allow = %q, want GET", allow)
+	}
+
+	// A value the wildcard constraint rejects keeps the convention-fallback
+	// semantics: the explicit route never applied, so no 405.
+	if res := req(t, h, http.MethodPut, "/post/abc"); res.StatusCode != http.StatusNotFound {
+		t.Fatalf("PUT /post/abc status = %d, want 404 (constraint miss is not a verb mismatch)", res.StatusCode)
+	}
+
+	// Method-less bindings accept every verb.
+	if res := req(t, h, http.MethodPut, "/any"); res.StatusCode != http.StatusOK {
+		t.Fatalf("PUT /any status = %d, want 200 (method-less binding)", res.StatusCode)
 	}
 }
 

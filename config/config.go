@@ -31,6 +31,12 @@ type Web struct {
 	// for paths no explicit route matched. The fallback is on by default;
 	// disable it when every route is bound explicitly.
 	DisableConventionFallback bool `yaml:"disableConventionFallback"`
+
+	// DisableCsrf turns off the CSRF validation middleware the HTTP entry
+	// point installs by default (double-submit cookie mode). Form-facing
+	// applications keep it on; pure API applications that authenticate per
+	// request (token/bearer) disable it.
+	DisableCsrf bool `yaml:"disableCsrf"`
 }
 
 // DB holds the database connection values shared by DML and migrations.

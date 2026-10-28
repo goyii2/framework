@@ -53,6 +53,29 @@ func Forbidden(message string) error { return NewHTTPError(http.StatusForbidden,
 // NotFound reports a resource that does not exist (404).
 func NotFound(message string) error { return NewHTTPError(http.StatusNotFound, message) }
 
+// MethodNotAllowed reports a verb the bound route does not accept (405);
+// senders must list the accepted verbs in an Allow response header.
+func MethodNotAllowed(message string) error {
+	return NewHTTPError(http.StatusMethodNotAllowed, message)
+}
+
+// NotAcceptable reports an Accept header no configured format satisfies (406).
+func NotAcceptable(message string) error {
+	return NewHTTPError(http.StatusNotAcceptable, message)
+}
+
+// UnsupportedMediaType reports a request Content-Type the endpoint does not
+// read (415).
+func UnsupportedMediaType(message string) error {
+	return NewHTTPError(http.StatusUnsupportedMediaType, message)
+}
+
+// TooManyRequests reports a client exceeding its rate budget (429); senders
+// must hint the wait in a Retry-After response header.
+func TooManyRequests(message string) error {
+	return NewHTTPError(http.StatusTooManyRequests, message)
+}
+
 // ServerError reports a server-side failure (500).
 func ServerError(message string) error {
 	return NewHTTPError(http.StatusInternalServerError, message)
@@ -97,7 +120,13 @@ func (h *Handler) renderError(c *Context, err error) {
 	}
 
 	name := http.StatusText(status)
-	if wantsJSON(c.r.Header.Get("Accept")) {
+	asJSON := true
+	if c.format == "html" {
+		asJSON = false
+	} else if c.format == "" {
+		asJSON = wantsJSON(c.r.Header.Get("Accept"))
+	}
+	if asJSON {
 		c.w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		c.w.WriteHeader(status)
 		_ = json.NewEncoder(c.w).Encode(errorBody{Name: name, Message: message, Status: status})

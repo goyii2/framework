@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -133,6 +134,150 @@ type wildcardConstraint struct {
 	re   *regexp.Regexp
 }
 
+// verbBinding remembers one explicitly mounted path pattern: the verbs it
+// was mounted for (anyVerb when a mount carried no method prefix) and the
+// wildcard constraints collected from "{name:regexp}" segments. It powers
+// the 405 + Allow answer for requests that hit a bound path with an unbound
+// verb.
+type verbBinding struct {
+	pattern     string // raw path pattern (method prefix stripped)
+	verbs       []string
+	anyVerb     bool
+	constraints []wildcardConstraint
+}
+
+// recordVerbs adds the pattern's verb to the binding table. Host-prefixed
+// patterns are skipped: they never reach the convention fallback anyway, so
+// answering 405 for them is not the handler's business.
+func (h *Handler) recordVerbs(pattern string, constraints []wildcardConstraint) {
+	method, path := splitVerbPattern(pattern)
+	if !strings.HasPrefix(path, "/") {
+		return
+	}
+	b := h.verbBindings[path]
+	if b == nil {
+		b = &verbBinding{pattern: path, constraints: constraints}
+		h.verbBindings[path] = b
+	}
+	if method == "" {
+		b.anyVerb = true
+		return
+	}
+	b.verbs = append(b.verbs, method)
+}
+
+// splitVerbPattern separates an optional "METHOD " prefix; found is false
+// for plain path-only patterns and (conservatively) host patterns.
+func splitVerbPattern(pattern string) (method, path string) {
+	first, rest, found := strings.Cut(pattern, " ")
+	if !found || !strings.HasPrefix(rest, "/") {
+		return "", pattern
+	}
+	return strings.ToUpper(first), rest
+}
+
+// explicitVerbs reports the verbs the request path is explicitly bound to.
+// Bindings whose wildcard constraints reject the path values contribute
+// nothing (such requests are genuine convention-fallback material). The
+// boolean reports anyVerb: a method-less mount accepts every verb.
+func (h *Handler) explicitVerbs(r *http.Request) (verbs []string, anyVerb bool) {
+	for _, b := range h.verbBindings {
+		values, ok := matchPathPattern(b.pattern, r.URL.Path)
+		if !ok {
+			continue
+		}
+		if !constraintsMatch(b.constraints, values) {
+			continue
+		}
+		if b.anyVerb {
+			return nil, true
+		}
+		verbs = append(verbs, b.verbs...)
+	}
+	return verbs, false
+}
+
+// constraintsMatch checks the recorded wildcard constraints against the
+// values matchPathPattern captured.
+func constraintsMatch(constraints []wildcardConstraint, values map[string]string) bool {
+	for _, wc := range constraints {
+		if !wc.re.MatchString(values[wc.name]) {
+			return false
+		}
+	}
+	return true
+}
+
+// matchPathPattern reports whether path matches an explicitly mounted path
+// pattern and returns the wildcard values it captured. Segments equal
+// literally; "{name}" and "{name:regexp}" match one segment; a final
+// "{name...}" matches the whole remainder (possibly empty); a final "{$}"
+// matches only the exact path without it. Patterns that are not plain paths
+// (host patterns) never match. It mirrors ServeMux wildcard matching for
+// the syntax the handler accepts, without redirect semantics.
+func matchPathPattern(pattern, path string) (map[string]string, bool) {
+	if strings.HasSuffix(pattern, "{$}") && path == strings.TrimSuffix(pattern, "{$}") {
+		return nil, true
+	}
+	p := strings.Split(pattern, "/")
+	s := strings.Split(path, "/")
+	values := map[string]string{}
+	for i := 0; i < len(p); i++ {
+		seg := p[i]
+		if seg == "{$}" {
+			// Only valid as the final segment; handled above.
+			return nil, false
+		}
+		if name, ok := trailingWildcardName(seg); ok {
+			if i >= len(s) {
+				values[name] = ""
+			} else {
+				values[name] = strings.Join(s[i:], "/")
+			}
+			return values, true
+		}
+		if i >= len(s) {
+			return nil, false
+		}
+		if name, ok := wildcardName(seg); ok {
+			values[name] = s[i]
+			continue
+		}
+		if seg != s[i] {
+			return nil, false
+		}
+	}
+	if len(p) != len(s) {
+		return nil, false
+	}
+	return values, true
+}
+
+// wildcardName recognizes a "{name}" or "{name:regexp}" segment and returns
+// the wildcard's name.
+func wildcardName(seg string) (string, bool) {
+	if len(seg) < 3 || seg[0] != '{' || seg[len(seg)-1] != '}' {
+		return "", false
+	}
+	name, _, _ := strings.Cut(seg[1:len(seg)-1], ":")
+	if name == "" {
+		return "", false
+	}
+	return name, true
+}
+
+// trailingWildcardName recognizes a final "{name...}" segment.
+func trailingWildcardName(seg string) (string, bool) {
+	if len(seg) < 6 || seg[0] != '{' || !strings.HasSuffix(seg, "...}") {
+		return "", false
+	}
+	name := seg[1 : len(seg)-4]
+	if name == "" {
+		return "", false
+	}
+	return name, true
+}
+
 // expandWildcards rewrites the "{name:regexp}" wildcard syntax into the
 // plain "{name}" form the ServeMux accepts and returns the constraints to
 // enforce per request. A value missing its constraint counts as unmatched,
@@ -188,23 +333,27 @@ type controllerSource interface {
 }
 
 // mountFallback installs the catch-all finishing every request no explicit
-// pattern matched: convention routes resolve through the controller
-// registries, the rest render the negotiated 404. The catch-all is the
-// least specific ServeMux pattern, so explicit routes always win, and
-// ServeMux answers unmatched methods with 405 before it runs.
+// pattern matched: wrong-verb requests to explicitly bound paths answer
+// 405 + Allow, convention routes resolve through the controller registries
+// (wrapped with the controller's middleware), the rest render the
+// negotiated 404. The catch-all is the least specific ServeMux pattern, so
+// explicit routes always win.
 func (h *Handler) mountFallback() {
 	h.mux.HandleFunc("/", h.serveConvention)
 }
 
-// serveConvention resolves requests that matched no explicit route. With
-// the convention fallback on it maps /{controller}/{action} — below the
-// longest registered module prefix, or at the root — onto ActionXxx
-// methods of the registered controllers; with the fallback off, or for
-// paths it cannot resolve, it leaves a not-found error. Like the explicit
-// dispatch it only sets Context.err: the pipeline renders it once.
-// Because the catch-all matches every method, a wrong-verb request to an
-// explicitly bound path also lands here — convention routes are not
-// method-bound (verb control is a filter concern), and misses render 404.
+// serveConvention resolves requests that matched no explicit route. A path
+// explicitly bound under other verbs is a verb mismatch, not a routing
+// miss: it answers 405 with an Allow header listing the bound verbs
+// instead of silently falling through to the convention resolution. With
+// the convention fallback on, /{controller}/{action} — below the longest
+// registered module prefix, or at the root — maps onto ActionXxx methods
+// of the registered controllers, wrapped with each controller's declared
+// middleware; with the fallback off, or for paths it cannot resolve, it
+// leaves a not-found error. Like the explicit dispatch it only sets
+// Context.err: the pipeline renders it once. Convention routes themselves
+// are not method-bound — restricting their verbs is what the VerbFilter
+// middleware is for.
 func (h *Handler) serveConvention(w http.ResponseWriter, r *http.Request) {
 	c := FromContext(r.Context())
 	if c == nil {
@@ -214,9 +363,23 @@ func (h *Handler) serveConvention(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c.r = r
+
+	if verbs, anyVerb := h.explicitVerbs(r); !anyVerb && !containsVerb(verbs, r.Method) {
+		if len(verbs) > 0 {
+			slices.Sort(verbs)
+			c.w.Header().Set("Allow", strings.Join(uniq(verbs), ", "))
+			c.err = MethodNotAllowed("method not allowed")
+			return
+		}
+	}
+
 	var action Action
 	if h.conventionFallback {
-		action, c.err = h.resolveConvention(r.URL.Path)
+		var controller any
+		action, controller, c.err = h.resolveConvention(r.URL.Path)
+		if action != nil {
+			action = withMiddleware(action, controllerMiddleware(controller))
+		}
 	} else {
 		c.err = NotFound("page not found")
 	}
@@ -225,12 +388,30 @@ func (h *Handler) serveConvention(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// containsVerb reports whether verb is listed.
+func containsVerb(verbs []string, verb string) bool {
+	return slices.Contains(verbs, verb)
+}
+
+// uniq drops adjacent duplicates of a sorted slice.
+func uniq(sorted []string) []string {
+	out := sorted[:0]
+	for i, v := range sorted {
+		if i == 0 || v != sorted[i-1] {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
 // resolveConvention maps path onto a controller action by naming
 // convention. The longest registered module prefix matching path at a
 // segment boundary scopes the lookup to that module's registry; anything
 // else resolves through the application root registry. Exactly two
-// segments (controller/action) resolve; every miss reports not-found.
-func (h *Handler) resolveConvention(path string) (Action, error) {
+// segments (controller/action) resolve; every miss reports not-found. The
+// owning controller is returned alongside the action so callers can wrap
+// the action with its declared middleware.
+func (h *Handler) resolveConvention(path string) (action Action, controller any, err error) {
 	rest := path
 	lookup := controllerSource(h.app)
 	if m := h.moduleFor(path); m != nil {
@@ -239,13 +420,14 @@ func (h *Handler) resolveConvention(path string) (Action, error) {
 	}
 	segs := strings.Split(strings.Trim(rest, "/"), "/")
 	if len(segs) != 2 || segs[0] == "" || segs[1] == "" {
-		return nil, NotFound("page not found")
+		return nil, nil, NotFound("page not found")
 	}
 	controller, ok := lookup.Controller(segs[0])
 	if !ok {
-		return nil, NotFound("page not found")
+		return nil, nil, NotFound("page not found")
 	}
-	return conventionAction(controller, segs[0], segs[1])
+	action, err = conventionAction(controller, segs[0], segs[1])
+	return action, controller, err
 }
 
 // moduleFor returns the module whose prefix is the longest registered
