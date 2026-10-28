@@ -1,6 +1,6 @@
 # 06: console 骨架（cobra）
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 **What to build:** cobra 命令行骨架：`goyii` 根命令、`goyii serve` 启动 HTTP 服务（优雅停机）、用户命令注册位；命令与应用装配复用同一份 config，CLI 与 Web 共享同一 Application。
 
