@@ -1,0 +1,4 @@
+app:
+  debug: false
+web:
+  listen: :80

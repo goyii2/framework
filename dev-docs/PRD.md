@@ -140,6 +140,6 @@ goyii migrate up && goyii migrate redo 1
 - yiimigrate 并入后原仓库去留（归档或停止演进）——待用户决定
 - 错误处理器输出协商的细节规则（Accept 头优先级、HTML 错误页模板覆盖机制）实现时定
 - `web.Context` 与 `context.Context` 的互转便利方法命名，实现时定
-- yaml/env 多源配置加载库选型（koanf / viper / 轻量自研绑定），实现时定
+- ~~yaml/env 多源配置加载库选型（koanf / viper / 轻量自研绑定），实现时定~~ 定稿：轻量自研绑定——goccy/go-yaml 单依赖（维护活跃、无传递依赖），多源合并 = app.yaml + web-<env>.yaml 顺序反序列化 + 字段路径约定（`DB.DSN` -> `DB_DSN`）env 覆盖；本项目源集合固定为「两 yaml + env」，koanf/viper 的多源机制无增益且依赖更重
 - 配置文件命名方案（草案：`config/app.yaml` + `config/web-<env>.yaml` + 环境变量覆盖），实现时定
 - examples/basic 演示数据库选型（建议 SQLite 零依赖启动；yiimigrate 已支持 SQLite 方言）

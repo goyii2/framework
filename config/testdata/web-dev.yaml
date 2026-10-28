@@ -1,0 +1,6 @@
+app:
+  debug: true
+log:
+  level: debug
+db:
+  dsn: root:dev@tcp(127.0.0.1:3306)/demo_dev
