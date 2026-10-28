@@ -1,6 +1,6 @@
 # 12: log 组件
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 **What to build:** 基于 log/slog 的日志组件：分级/分类（category 过滤）、多 Target（console/file，可扩展）、性能 profile（计时区间产出开始/结束与耗时）；日志器经 Application 取用。
 
