@@ -1,0 +1,14 @@
+# Go
+/bin/
+*.exe
+*.test
+*.out
+
+# Env
+.env
+.env.*
+
+# Editor/OS
+.idea/
+.vscode/
+Thumbs.db
