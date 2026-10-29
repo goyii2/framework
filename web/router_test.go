@@ -44,6 +44,15 @@ type reportController struct {
 
 func (reportController) ActionBroken(c *web.Context, extra string) error { return nil }
 
+// dashController lives in the /admin module scope of the nesting tests.
+type dashController struct {
+	web.Controller
+}
+
+func (dashController) ActionIndex(c *web.Context) error {
+	return c.JSON(map[string]string{"from": "admin-convention"})
+}
+
 // newConventionApp assembles an application with one root controller and
 // one /admin module controller for convention-fallback tests. CSRF is off:
 // these tests exercise routing, not form-token mechanics (covered by the
@@ -391,16 +400,18 @@ func TestModuleScopedExplicitRoutes(t *testing.T) {
 		t.Error("Module under an unregistered prefix must error")
 	}
 
+	// Names are module-relative: the module path is prepended
+	// automatically, so "report/run" registers "admin/report/run".
 	admin.Get("report/run", func(c *web.Context) error {
 		return c.JSON(map[string]string{"from": "module-explicit"})
-	}).Name("admin/report/run")
+	}).Name("report/run")
 	admin.Get("user/{id:[0-9]+}", func(c *web.Context) error {
 		id, err := c.ParamInt("id")
 		if err != nil {
 			return web.BadRequest(err.Error())
 		}
 		return c.JSON(map[string]any{"id": id})
-	}).Name("admin/user/view")
+	}).Name("user/view")
 
 	// Explicit mounts below the prefix answer and reverse by name.
 	if got := source(t, h, "/admin/report/run"); got != "module-explicit" {
@@ -432,6 +443,137 @@ func TestModuleScopedExplicitRoutes(t *testing.T) {
 	// The same controller's convention route stays reachable.
 	if got := source(t, h, "/admin/user/list"); got != "module-convention" {
 		t.Errorf("/admin/user/list from = %q, want module-convention", got)
+	}
+}
+
+// newNestedApp assembles the module tree of the nesting tests: /admin with
+// a dash controller and a nested /admin/report submodule with a user
+// controller, both reachable through the convention fallback.
+func newNestedApp(t *testing.T) (*web.Handler, *base.Application) {
+	t.Helper()
+	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}})
+	admin, err := base.NewModule(app, "/admin")
+	if err != nil {
+		t.Fatalf("creating /admin module: %v", err)
+	}
+	if err := app.RegisterModule(admin); err != nil {
+		t.Fatalf("registering /admin module: %v", err)
+	}
+	report, err := base.NewModule(app, "/admin/report")
+	if err != nil {
+		t.Fatalf("creating /admin/report module: %v", err)
+	}
+	if err := admin.RegisterModule(report); err != nil {
+		t.Fatalf("nesting /admin/report module: %v", err)
+	}
+	if err := admin.RegisterController("dash", dashController{}); err != nil {
+		t.Fatalf("registering /admin controller: %v", err)
+	}
+	if err := report.RegisterController("user", userController{}); err != nil {
+		t.Fatalf("registering /admin/report controller: %v", err)
+	}
+	return web.NewHandler(app), app
+}
+
+// TestNestedModuleConventionResolution pins layered controller lookup along
+// the module tree: each module scope resolves its own controllers under its
+// full prefix and no registry leaks into another level.
+func TestNestedModuleConventionResolution(t *testing.T) {
+	h, _ := newNestedApp(t)
+
+	// The submodule answers under its full prefix...
+	if got := source(t, h, "/admin/report/user/list"); got != "module-convention" {
+		t.Errorf("/admin/report/user/list from = %q, want module-convention", got)
+	}
+	// ...the parent module under its own, undisturbed by the child.
+	if got := source(t, h, "/admin/dash/index"); got != "admin-convention" {
+		t.Errorf("/admin/dash/index from = %q, want admin-convention", got)
+	}
+
+	// Scope isolation across the tree levels.
+	for _, target := range []string{
+		"/admin/user/list",         // submodule controller is invisible to the parent scope
+		"/admin/report/dash/index", // parent controller is invisible to the submodule scope
+		"/user/list",               // submodule prefix does not exist at the root
+		"/report/user/list",        // ditto without the /admin stem
+		"/admin/report",            // prefix alone is no convention route
+	} {
+		if res := do(t, h, target, ""); res.StatusCode != http.StatusNotFound {
+			t.Errorf("%s status = %d, want 404 (scope isolation)", target, res.StatusCode)
+		}
+	}
+}
+
+// TestNestedModuleExplicitRoutesAndNames mounts explicit routes through the
+// nested registrar: names stay module-relative and automatically carry the
+// module path, so reverse generation hits via the manager and url.To.
+func TestNestedModuleExplicitRoutesAndNames(t *testing.T) {
+	url.SetDefault(nil)
+	defer url.SetDefault(nil)
+
+	h, _ := newNestedApp(t)
+
+	adminRoutes, err := h.Module("/admin")
+	if err != nil {
+		t.Fatalf("Module(/admin) error: %v", err)
+	}
+	adminRoutes.Get("panel", func(c *web.Context) error {
+		return c.JSON(map[string]string{"from": "admin-explicit"})
+	}).Name("panel")
+
+	reportRoutes, err := h.Module("/admin/report")
+	if err != nil {
+		t.Fatalf("Module(/admin/report) error: %v", err)
+	}
+	reportRoutes.Get("dashboard", func(c *web.Context) error {
+		return c.JSON(map[string]string{"from": "nested-explicit"})
+	}).Name("dashboard")
+	reportRoutes.Get("user/{id:[0-9]+}", func(c *web.Context) error {
+		id, err := c.ParamInt("id")
+		if err != nil {
+			return web.BadRequest(err.Error())
+		}
+		return c.JSON(map[string]any{"id": id})
+	}).Name("user/view")
+
+	// The mounts answer under the concatenated prefixes.
+	if got := source(t, h, "/admin/report/dashboard"); got != "nested-explicit" {
+		t.Errorf("/admin/report/dashboard from = %q, want nested-explicit", got)
+	}
+	if got := source(t, h, "/admin/panel"); got != "admin-explicit" {
+		t.Errorf("/admin/panel from = %q, want admin-explicit", got)
+	}
+
+	// Names carry the module path automatically: "dashboard" below
+	// /admin/report registered as "admin/report/dashboard".
+	cases := []struct {
+		name   string
+		params url.P
+		want   string
+	}{
+		{"admin/panel", nil, "/admin/panel"},
+		{"admin/report/dashboard", nil, "/admin/report/dashboard"},
+		{"admin/report/user/view", url.P{"id": "9"}, "/admin/report/user/9"},
+	}
+	for _, tc := range cases {
+		got, err := h.URLs().URL(tc.name, tc.params)
+		if err != nil || got != tc.want {
+			t.Errorf("URL(%s) = %q, %v; want %q", tc.name, got, err, tc.want)
+		}
+	}
+
+	// Through the package default, url.To resolves the nested names too.
+	url.SetDefault(h.URLs())
+	if got := url.To("admin/report/dashboard", nil); got != "/admin/report/dashboard" {
+		t.Errorf("url.To(admin/report/dashboard) = %q, want /admin/report/dashboard", got)
+	}
+	if got := url.To("admin/report/user/view", url.P{"id": "4"}); got != "/admin/report/user/4" {
+		t.Errorf("url.To(admin/report/user/view) = %q, want /admin/report/user/4", got)
+	}
+
+	// The module's convention route keeps working beside the explicit one.
+	if got := source(t, h, "/admin/report/user/list"); got != "module-convention" {
+		t.Errorf("/admin/report/user/list from = %q, want module-convention", got)
 	}
 }
 

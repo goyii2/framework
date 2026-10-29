@@ -21,9 +21,9 @@ var (
 	// ErrDuplicateModulePrefix is returned when a module with the same prefix
 	// is already registered.
 	ErrDuplicateModulePrefix = errors.New("base: a module with this prefix is already registered")
-	// ErrModuleNestingUnsupported is returned by Module.RegisterModule until
-	// module nesting is implemented.
-	ErrModuleNestingUnsupported = errors.New("base: nesting modules is not supported yet")
+	// ErrInvalidSubmodulePrefix is returned when registering a module under a
+	// parent whose prefix it does not extend by exactly one segment.
+	ErrInvalidSubmodulePrefix = errors.New("base: submodule prefix must extend the parent prefix by exactly one segment")
 	// ErrInvalidControllerID is returned for controller ids that cannot serve
 	// as a route segment.
 	ErrInvalidControllerID = errors.New(`base: controller id must be non-empty and contain no "/"`)
@@ -34,13 +34,17 @@ var (
 
 // Module partitions the application behind a route prefix (e.g. "/admin")
 // with its own controller registry: controllers registered on a module are
-// owned by it and resolve under its prefix. Components are not duplicated
-// per module — they resolve through the owning application via App;
-// module-scoped component overrides are a reserved later capability, as is
-// nesting (see RegisterModule).
+// owned by it and resolve under its prefix. Modules nest (see
+// RegisterModule) — a child module's prefix extends its parent's, and
+// controller lookup follows the longest matching prefix down the module
+// tree. Components are not duplicated per module — they resolve through the
+// owning application via App; module-scoped component overrides remain a
+// reserved later capability.
 type Module struct {
-	app    *Application
-	prefix string
+	app      *Application
+	prefix   string
+	parent   *Module
+	children moduleRegistry
 
 	controllers controllerRegistry
 }
@@ -122,13 +126,45 @@ func (r *controllerRegistry) ids() []string {
 	return append([]string(nil), r.order...)
 }
 
-// RegisterModule reserves sub-module registration: nesting modules under a
-// module is planned but not implemented, so it always reports
-// ErrModuleNestingUnsupported.
-func (m *Module) RegisterModule(child *Module) error { return ErrModuleNestingUnsupported }
+// RegisterModule adds child as a submodule of m: the child must belong to
+// the same application and its prefix must extend m's prefix by exactly one
+// segment (e.g. "/admin" takes "/admin/report" but not "/admin/report/deep"
+// — that depth nests through the intermediate module). The child also lands
+// in the application's flat module table, so prefix uniqueness is global
+// and the router resolves it under its full prefix. Registering a module
+// directly on the application keeps it a top-level module with no parent.
+func (m *Module) RegisterModule(child *Module) error {
+	if child == nil {
+		return ErrNilModule
+	}
+	if child.app != m.app {
+		return ErrForeignModule
+	}
+	rel, ok := strings.CutPrefix(child.prefix, m.prefix+"/")
+	if !ok || rel == "" || strings.Contains(rel, "/") {
+		return ErrInvalidSubmodulePrefix
+	}
+	// The application's table is the global uniqueness check; the parent
+	// link is only set once the child is committed there, so failures leave
+	// no partially attached module behind.
+	if err := m.app.modules.register(m.app, child); err != nil {
+		return err
+	}
+	child.parent = m
+	return m.children.register(m.app, child)
+}
 
-// moduleRegistry is the application's single-layer module table keyed by
-// route prefix; safe for concurrent use.
+// Parent returns the module this one was nested under, nil for top-level
+// modules registered on the application itself.
+func (m *Module) Parent() *Module { return m.parent }
+
+// Modules returns the modules nested directly below this one, sorted by
+// prefix.
+func (m *Module) Modules() []*Module { return m.children.list() }
+
+// moduleRegistry is the module table shared by the application (the flat
+// table of all registered prefixes) and by each module (its direct
+// children); keyed by route prefix, safe for concurrent use.
 type moduleRegistry struct {
 	mu       sync.RWMutex
 	byPrefix map[string]*Module

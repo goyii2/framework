@@ -1,7 +1,9 @@
 // Controllers of the basic example. Together they exercise the P0 web
 // capabilities: session login/logout, role-based access control, verb
 // filtering, CSRF round trips, negotiated error rendering, scenario
-// validation on save and a cached list endpoint.
+// validation on save and a cached list endpoint — plus the nested-module
+// demo under /admin (module-level access control, submodule prefixing and
+// module-relative route names).
 package main
 
 import (
@@ -51,6 +53,7 @@ func (site *SiteController) ActionIndex(c *web.Context) error {
 		"endpoints": []string{
 			"/site/csrf", "/login", "/logout", "/me",
 			"/post", "/post/{id}",
+			"/admin/panel/index", "/admin/report/dashboard",
 		},
 	})
 }
@@ -334,4 +337,35 @@ func postMaxID(ctx context.Context) int64 {
 		return -1
 	}
 	return maxID
+}
+
+// PanelController is the /admin module's dashboard. It declares no
+// middleware of its own: the module-level access control installed on the
+// module's routes guards every request below /admin — this convention
+// route included — so only logged-in users ever reach the action.
+type PanelController struct {
+	web.Controller
+}
+
+func (panel *PanelController) ActionIndex(c *web.Context) error {
+	return c.JSON(map[string]any{
+		"module": "admin",
+		"user":   c.User().Identity().GetName(),
+		// The submodule's route name carries the module path automatically.
+		"report": url.To("admin/report/dashboard", nil),
+	})
+}
+
+// ReportController serves the nested /admin/report submodule. Its explicit
+// route is named "dashboard" at the mount site; the module path joins in,
+// so the name the application knows is "admin/report/dashboard".
+type ReportController struct {
+	web.Controller
+}
+
+func (rc *ReportController) ActionDashboard(c *web.Context) error {
+	return c.JSON(map[string]any{
+		"module": "admin/report",
+		"user":   c.User().Identity().GetName(),
+	})
 }

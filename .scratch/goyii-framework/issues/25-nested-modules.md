@@ -1,6 +1,6 @@
 # 25: 嵌套 Module 落地
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 **What to build:** 应用可注册嵌套模块（如 admin 模块下再挂 report 子模块）：路由前缀逐级拼接、控制器沿模块树分层查找、命名路由自动携带模块路径（如 `admin/report/dashboard`），并补齐模块级中间件 `ModuleRoutes.Use`（对应 Yii2 module beforeAction 的能力位）。嵌套此前仅有桩（`RegisterModule` 固定返回不支持错误），本票将其变为可用能力。不做模块级组件隔离——组件仍归全局 Application。
 

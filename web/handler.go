@@ -18,12 +18,13 @@ import (
 //
 // Per request the pipeline is: trigger EventBeforeRequest, run the global
 // middleware chain around routing, dispatch to the mounted action with a
-// fresh Context carrying the application (wrapped with the controller's
-// middleware when mounted through Ctrl or resolved by convention), render
-// any returned error (format negotiated from Accept, panics recovered as
-// 500), then trigger EventAfterRequest. Requests no explicit pattern
-// matches land on the convention fallback (see router.go); a path bound
-// explicitly under other verbs answers 405 with Allow first.
+// fresh Context carrying the application (wrapped with the middleware of
+// the controller — when mounted through Ctrl or resolved by convention —
+// and of the module owning the route's prefix, see ModuleRoutes.Use),
+// render any returned error (format negotiated from Accept, panics
+// recovered as 500), then trigger EventAfterRequest. Requests no explicit
+// pattern matches land on the convention fallback (see router.go); a path
+// bound explicitly under other verbs answers 405 with Allow first.
 type Handler struct {
 	app *base.Application
 	mux *http.ServeMux
@@ -59,6 +60,12 @@ type Handler struct {
 	// unbound verb can be answered 405 + Allow instead of silently falling
 	// through to the convention routes.
 	verbBindings map[string]*verbBinding
+
+	// moduleMW holds the middleware declared per module through
+	// ModuleRoutes.Use; it wraps every route below the module prefix —
+	// explicit mounts and convention routes alike, submodules included.
+	// Written while assembling, read per request.
+	moduleMW map[*base.Module][]Middleware
 }
 
 // NewHandler creates the HTTP entry point serving app. The convention
@@ -74,6 +81,7 @@ func NewHandler(app *base.Application) *Handler {
 		views:              view.NewRegistry(),
 		conventionFallback: !app.Config().Web.DisableConventionFallback,
 		verbBindings:       map[string]*verbBinding{},
+		moduleMW:           map[*base.Module][]Middleware{},
 	}
 	h.rebuildPipe()
 	h.session = NewSessionManager(app.Config().Session)

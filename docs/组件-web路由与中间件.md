@@ -8,9 +8,10 @@
 flowchart LR
     REQ[请求] --> PIPE["全局中间件链<br/>Session -> Language -> Csrf -> 应用自加"]
     PIPE --> MUX["ServeMux 显式绑定<br/>GET /post/{id:[0-9]+}"]
-    MUX -- 未命中 --> FALL["约定回退 /{controller}/{action}<br/>RegisterController 注册表"]
-    MUX --> CMW["Controller 中间件<br/>AccessControl / VerbFilter"]
-    FALL --> CMW
+    MUX -- 未命中 --> FALL["约定回退 /{controller}/{action}<br/>模块/根 RegisterController 注册表"]
+    MUX --> MMW["Module 中间件<br/>ModuleRoutes.Use（模块前缀内）"]
+    FALL --> MMW
+    MMW --> CMW["Controller 中间件<br/>AccessControl / VerbFilter"]
     CMW --> ACT["Action(ctx *web.Context) error"]
     ACT -->|nil| RESP[响应已写]
     ACT -->|error| ERR["统一错误处理<br/>按 Accept / 协商格式渲染"]
@@ -34,6 +35,28 @@ url.SetDefault(h.URLs())                    // url.To 反向生成走这个路�
 - 已显式绑定的路径收到未绑定动词 -> `405 + Allow`；其它未命中走约定回退（`web.DisableConventionFallback` 可关）。
 - 命名路由供反向生成：`url.To("post/view", url.P{"id": 7})` -> `/post/7`；未命名的 route id 按 `/<name>` 约定拼装。
 
+## 模块路由与模块级中间件
+
+模块（[组件：base 与 config](组件-base与config.md)）经 `h.Module(prefix)` 取得挂载位，前缀逐级拼接、嵌套模块用全前缀取 registrar：
+
+```go
+admin, _ := base.NewModule(app, "/admin")
+app.RegisterModule(admin)
+report, _ := base.NewModule(app, "/admin/report")
+admin.RegisterModule(report)             // 子模块挂在父模块下
+
+ar, _ := h.Module("/admin")
+ar.Use(web.AccessControl{Rules: [...]}.Middleware())   // 模块级中间件
+ar.Get("/panel", ctrl.ActionPanel).Name("panel")        // 挂载 /admin/panel，名字 admin/panel
+
+rr, _ := h.Module("/admin/report")       // 嵌套模块按全前缀取挂载位
+rr.Get("dashboard", ctrl.ActionDash).Name("dashboard")  // /admin/report/dashboard，名字 admin/report/dashboard
+```
+
+- **模块级中间件**（`ModuleRoutes.Use`，对应 Yii2 module beforeAction）：作用于该模块前缀下的全部路由——显式挂载与约定回退一视同仁，嵌套子模块的路由也包在内（祖先模块的中间件在外层）。全局链 -> 模块中间件 -> 控制器中间件 -> Action。
+- **命名路由自动带模块路径**：`Name` 传模块相对名，注册时自动拼上模块路径（`"dashboard"` -> `"admin/report/dashboard"`），`url.To` 反向生成直接命中；路径参数照常填充。
+- **Layout 隔离**：子模块经自己的 registrar 设 `Layout` 即覆写父模块的框架，页面内 `ctx.SetLayout` 仍最高优先（见 [组件：view 与 templ](组件-view与templ.md)）。
+
 ## Context 与 Action
 
 ```go
@@ -52,7 +75,7 @@ func (c *PostController) ActionView(ctx *web.Context) error {
 
 ## 中间件（Filter 族）
 
-全局链经 `h.Use(...)` 追加；单控制器经实现 `Middleware() []web.Middleware` 只包自己的动作：
+全局链经 `h.Use(...)` 追加；模块级经 `ModuleRoutes.Use(...)` 包住该模块前缀下的全部路由；单控制器经实现 `Middleware() []web.Middleware` 只包自己的动作：
 
 | 中间件 | 用途 | 要点 |
 |---|---|---|

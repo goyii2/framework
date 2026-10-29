@@ -125,16 +125,98 @@ func TestApplicationModuleRegistry(t *testing.T) {
 	}
 }
 
-// TestModuleNestingReserved pins the reserved nesting seam: registering a
-// module under a module must fail with a dedicated error until nesting is
-// implemented.
-func TestModuleNestingReserved(t *testing.T) {
+// TestModuleNestingRegistersChild covers the nesting seam: a child module
+// registered under its parent lands in the application table (so the router
+// resolves its full prefix) and in the parent's child list, with the parent
+// link walkable.
+func TestModuleNestingRegistersChild(t *testing.T) {
 	app := New(config.Default())
-	parent, _ := NewModule(app, "/admin")
-	child, _ := NewModule(app, "/admin/settings")
+	admin, _ := NewModule(app, "/admin")
+	if err := app.RegisterModule(admin); err != nil {
+		t.Fatalf("registering parent: %v", err)
+	}
+	report, err := NewModule(app, "/admin/report")
+	if err != nil {
+		t.Fatalf("creating child: %v", err)
+	}
+	if err := admin.RegisterModule(report); err != nil {
+		t.Fatalf("nesting child: %v", err)
+	}
 
-	if err := parent.RegisterModule(child); !errors.Is(err, ErrModuleNestingUnsupported) {
-		t.Errorf("nested registration error = %v, want ErrModuleNestingUnsupported", err)
+	if got, ok := app.Module("/admin/report"); !ok || got != report {
+		t.Error("nested module must resolve through the application table")
+	}
+	if got := report.Parent(); got != admin {
+		t.Error("child Parent() must return the module it was nested under")
+	}
+	if got := admin.Parent(); got != nil {
+		t.Error("top-level module Parent() must be nil")
+	}
+	if ms := admin.Modules(); len(ms) != 1 || ms[0] != report {
+		t.Errorf("admin.Modules() = %v, want [report]", ms)
+	}
+	if ms := report.Modules(); len(ms) != 0 {
+		t.Errorf("leaf module Modules() = %v, want empty", ms)
+	}
+
+	// A second nesting level hangs off the intermediate module.
+	deep, _ := NewModule(app, "/admin/report/deep")
+	if err := report.RegisterModule(deep); err != nil {
+		t.Fatalf("nesting grandchild: %v", err)
+	}
+	if deep.Parent() != report {
+		t.Error("grandchild Parent() must be the intermediate module")
+	}
+}
+
+// TestModuleNestingRejectedPairs pins the wiring mistakes nesting refuses:
+// nil and foreign modules, prefixes unrelated to or deeper than the parent,
+// and prefixes already taken anywhere in the application.
+func TestModuleNestingRejectedPairs(t *testing.T) {
+	app := New(config.Default())
+	admin, _ := NewModule(app, "/admin")
+	if err := app.RegisterModule(admin); err != nil {
+		t.Fatalf("registering parent: %v", err)
+	}
+
+	if err := admin.RegisterModule(nil); !errors.Is(err, ErrNilModule) {
+		t.Errorf("nil child error = %v, want ErrNilModule", err)
+	}
+	foreign, _ := NewModule(New(config.Default()), "/admin/report")
+	if err := admin.RegisterModule(foreign); !errors.Is(err, ErrForeignModule) {
+		t.Errorf("foreign child error = %v, want ErrForeignModule", err)
+	}
+	for _, prefix := range []string{
+		"/blog",              // unrelated prefix
+		"/admin",             // the parent itself
+		"/administrator",     // sharing the parent's stem is not being below it
+		"/admin/report/deep", // depth beyond one segment must nest through /admin/report
+	} {
+		child, err := NewModule(app, prefix)
+		if err != nil {
+			t.Fatalf("NewModule(%q) unexpected error: %v", prefix, err)
+		}
+		if err := admin.RegisterModule(child); !errors.Is(err, ErrInvalidSubmodulePrefix) {
+			t.Errorf("nesting %q under /admin error = %v, want ErrInvalidSubmodulePrefix", prefix, err)
+		}
+	}
+
+	// Prefix uniqueness is global: the same prefix cannot land twice,
+	// whatever registration path is used.
+	report, _ := NewModule(app, "/admin/report")
+	if err := admin.RegisterModule(report); err != nil {
+		t.Fatalf("nesting child: %v", err)
+	}
+	dup, _ := NewModule(app, "/admin/report")
+	if err := admin.RegisterModule(dup); !errors.Is(err, ErrDuplicateModulePrefix) {
+		t.Errorf("duplicate child error = %v, want ErrDuplicateModulePrefix", err)
+	}
+	if err := app.RegisterModule(dup); !errors.Is(err, ErrDuplicateModulePrefix) {
+		t.Errorf("duplicate via application error = %v, want ErrDuplicateModulePrefix", err)
+	}
+	// A rejected duplicate leaves no trace in the tree.
+	if ms := admin.Modules(); len(ms) != 1 {
+		t.Errorf("admin.Modules() after rejected duplicates = %v, want one child", ms)
 	}
 }
 

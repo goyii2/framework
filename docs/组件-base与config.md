@@ -52,15 +52,22 @@ app.Trigger(ctx, base.EventAfterRequest, nil)
 
 ## Module 与 Controller 注册表
 
-Module 是单层路由分区（`/admin` 一段前缀一组路由），嵌套接口预留给后续版本：
+Module 是带路由前缀的分区（`/admin`），可嵌套：子模块前缀逐级拼接（`/admin/report`），控制器沿模块树分层查找——约定回退按最长匹配前缀落到所属模块的注册表。组件不做模块级隔离，仍归全局 Application。
 
 ```go
 mod, err := base.NewModule(app, "/admin")
-app.RegisterModule(mod)
-routes, err := handler.Module("/admin")
-routes.Layout(myLayout)   // 模块级页面框架（见 组件：view 与 templ）
-routes.Get("/dash", ctrl.ActionDash)
+app.RegisterModule(mod)                 // 顶层模块挂在应用上
+
+report, err := base.NewModule(app, "/admin/report")
+mod.RegisterModule(report)              // 子模块挂在父模块下（前缀必须恰好多一段）
+
+routes, err := handler.Module("/admin")       // 路由挂载见 组件：web 路由与中间件
+routes.Use(myMiddleware)                // 模块级中间件：作用于该模块全部路由
+routes.Layout(myLayout)                 // 模块级页面框架（见 组件：view 与 templ）
+routes.Get("/dash", ctrl.ActionDash).Name("dash")  // 名字自动带模块路径 -> "admin/dash"
 ```
+
+注册约束：前缀全局唯一（重复注册 `ErrDuplicateModulePrefix`）；子模块前缀必须是父前缀加恰好一段（`ErrInvalidSubmodulePrefix`）；`mod.Modules()` 列直接子模块、`mod.Parent()` 回溯父模块。
 
 Controller 注册表喂约定回退路由（`/{controller}/{action}` -> `ActionXxx`）：
 
@@ -68,6 +75,8 @@ Controller 注册表喂约定回退路由（`/{controller}/{action}` -> `ActionX
 app.RegisterController("site", &SiteController{})
 // 未显式绑定的 /site/index 请求由注册表解析到 SiteController.ActionIndex
 ```
+
+模块内控制器只在该模块前缀下可解析（`/admin/user/list` 走 admin 模块的注册表），根注册表与各模块注册表互不泄露。
 
 ## config：yaml + env 双轨
 

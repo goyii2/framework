@@ -92,7 +92,10 @@ func main() {
 // registerRoutes wires the URL space. Two families live side by side: the
 // /post JSON API of the P0 walkthrough and the /posts browser pages of the
 // P1 face; /site/index stays unbound on purpose so it resolves through the
-// convention fallback (/{controller}/{action} over the root registry).
+// convention fallback (/{controller}/{action} over the root registry). The
+// /admin module tree demos nesting: one module-level access rule guards
+// the whole subtree, the /admin/report submodule adds a second prefix
+// level with module-relative route names.
 func registerRoutes(h *web.Handler, app *base.Application, auth *rbac.DbManager) {
 	// Error responses negotiate JSON/HTML from the Accept header; write
 	// requests carry a JSON body (API) or a form-encoded one (browser
@@ -145,6 +148,41 @@ func registerRoutes(h *web.Handler, app *base.Application, auth *rbac.DbManager)
 	if err := app.RegisterController("post", post); err != nil {
 		fail(err)
 	}
+
+	// The nested module tree: /admin carries one access rule for its whole
+	// subtree (every route below the prefix, explicit and convention
+	// alike), and /admin/report nests below it. The submodule's route
+	// names register module-relative — "dashboard" becomes
+	// "admin/report/dashboard".
+	admin, err := base.NewModule(app, "/admin")
+	if err != nil {
+		fail(err)
+	}
+	if err := app.RegisterModule(admin); err != nil {
+		fail(err)
+	}
+	report, err := base.NewModule(app, "/admin/report")
+	if err != nil {
+		fail(err)
+	}
+	if err := admin.RegisterModule(report); err != nil {
+		fail(err)
+	}
+	adminRoutes, err := h.Module("/admin")
+	if err != nil {
+		fail(err)
+	}
+	adminRoutes.Use(web.AccessControl{Auth: auth, Rules: []web.AccessRule{
+		{Allow: true, Roles: []string{"@"}}, // module-wide: login required below /admin
+	}}.Middleware())
+	if err := admin.RegisterController("panel", &PanelController{}); err != nil {
+		fail(err)
+	}
+	reportRoutes, err := h.Module("/admin/report")
+	if err != nil {
+		fail(err)
+	}
+	reportRoutes.Get("dashboard", (&ReportController{}).ActionDashboard).Name("dashboard")
 }
 
 // findIdentity resolves the identity id stored in a session back to the

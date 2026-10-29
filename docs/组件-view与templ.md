@@ -31,7 +31,7 @@ flowchart LR
     P --> C["action 渲染的内容"]
 ```
 
-应用级公共外框 = 装配一段全局中间件给每个请求 SetLayout（`examples/basic` 的做法；布局闭包捕获请求 Context，菜单可见性随身份/权限/语言变化）。`c.ClearLayout()` 输出裸片段。
+应用级公共外框 = 装配一段全局中间件给每个请求 SetLayout（`examples/basic` 的做法；布局闭包捕获请求 Context，菜单可见性随身份/权限/语言变化）。`c.ClearLayout()` 输出裸片段。嵌套模块下子模块经自己的 registrar 设 `Layout` 即覆写父模块的框架，父模块路由不受影响。
 
 ## Widget 四件
 

@@ -110,6 +110,33 @@ func newRenderApp(t *testing.T) *web.Handler {
 		})
 		return c.Render("page/hello", renderViewData{Title: "own"})
 	})
+
+	// A nested submodule with its own frame: its routes must carry the
+	// child frame, not the parent module's.
+	report, err := base.NewModule(app, "/admin/report")
+	if err != nil {
+		t.Fatalf("creating /admin/report module: %v", err)
+	}
+	if err := mod.RegisterModule(report); err != nil {
+		t.Fatalf("nesting /admin/report module: %v", err)
+	}
+	reportRoutes, err := h.Module("/admin/report")
+	if err != nil {
+		t.Fatalf("module routes: %v", err)
+	}
+	reportRoutes.Layout(func(p view.Page) templ.Component {
+		return markup(`<div id="report-frame">` + p.Title + `</div>`)
+	})
+	reportRoutes.Get("/panel", func(c *web.Context) error {
+		c.SetTitle("Panel")
+		return c.Render("page/hello", renderViewData{Title: "panel"})
+	})
+	reportRoutes.Get("/own-frame", func(c *web.Context) error {
+		c.SetLayout(func(p view.Page) templ.Component {
+			return markup(`<div id="own-frame"></div>`)
+		})
+		return c.Render("page/hello", renderViewData{Title: "own"})
+	})
 	return h
 }
 
@@ -227,6 +254,38 @@ func TestModuleLayoutOverride(t *testing.T) {
 	}
 	if strings.Contains(own, "admin-frame") {
 		t.Errorf("module frame still rendered under page override:\n%s", own)
+	}
+}
+
+// TestNestedModuleLayoutOverride pins layout isolation under nesting: the
+// submodule's frame wins on its routes, the parent module's frame stays on
+// its own, and a page-level override still wins over both.
+func TestNestedModuleLayoutOverride(t *testing.T) {
+	h := newRenderApp(t)
+
+	// The submodule route carries the submodule's frame, not the parent's
+	// and not the built-in shell.
+	_, panel := get(t, h, "/admin/report/panel")
+	if !strings.Contains(panel, `<div id="report-frame">Panel</div>`) {
+		t.Errorf("submodule layout not applied:\n%s", panel)
+	}
+	if strings.Contains(panel, "admin-frame") || strings.Contains(panel, "<main>") {
+		t.Errorf("parent or default frame leaked into the submodule route:\n%s", panel)
+	}
+
+	// The parent module's routes keep their frame.
+	_, admin := get(t, h, "/admin/dash")
+	if !strings.Contains(admin, `<div id="admin-frame">`) || strings.Contains(admin, "report-frame") {
+		t.Errorf("parent module layout disturbed by the submodule:\n%s", admin)
+	}
+
+	// A page-level override wins over the submodule frame.
+	_, own := get(t, h, "/admin/report/own-frame")
+	if !strings.Contains(own, `<div id="own-frame">`) {
+		t.Errorf("page override did not win over the submodule layout:\n%s", own)
+	}
+	if strings.Contains(own, "report-frame") {
+		t.Errorf("submodule frame still rendered under page override:\n%s", own)
 	}
 }
 

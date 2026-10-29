@@ -97,9 +97,10 @@ func (a *Application) Trigger(ctx context.Context, name EventName, data any) {
 	a.events.trigger(ctx, Event{Name: name, Data: data})
 }
 
-// RegisterModule adds m to the application's single-layer module registry so
-// the router can resolve its prefix. Module prefixes are unique and modules
-// must belong to this application.
+// RegisterModule adds m to the application's module table so the router can
+// resolve its prefix. The table is flat over full prefixes (nested children
+// registered through Module.RegisterModule land here too), prefix uniqueness
+// is global, and modules must belong to this application.
 func (a *Application) RegisterModule(m *Module) error { return a.modules.register(a, m) }
 
 // Module returns the module registered under prefix.

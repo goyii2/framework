@@ -236,6 +236,81 @@ func TestMiddlewareSeesRequestWebContext(t *testing.T) {
 	}
 }
 
+// TestModuleMiddlewareWrapsModuleRoutes covers ModuleRoutes.Use — the
+// Yii2 module beforeAction capability: middleware declared on a module
+// wraps its explicit mounts and its convention routes, ancestor modules
+// run outermost on submodule routes, and nothing leaks outside the prefix.
+// It wraps at request time, so declaring middleware after mounting routes
+// still applies to them.
+func TestModuleMiddlewareWrapsModuleRoutes(t *testing.T) {
+	trace := &syncBuffer{}
+	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}})
+	h := web.NewHandler(app)
+	h.Use(traceMiddleware(trace, "global"))
+
+	admin, err := base.NewModule(app, "/admin")
+	if err != nil {
+		t.Fatalf("creating /admin module: %v", err)
+	}
+	if err := app.RegisterModule(admin); err != nil {
+		t.Fatalf("registering /admin module: %v", err)
+	}
+	report, err := base.NewModule(app, "/admin/report")
+	if err != nil {
+		t.Fatalf("creating /admin/report module: %v", err)
+	}
+	if err := admin.RegisterModule(report); err != nil {
+		t.Fatalf("nesting /admin/report module: %v", err)
+	}
+
+	reportRoutes, err := h.Module("/admin/report")
+	if err != nil {
+		t.Fatalf("module routes: %v", err)
+	}
+	// Mounted before any module middleware on purpose: the wrap resolves
+	// per request, so later Use calls must still cover this route.
+	reportRoutes.Get("/summary", func(c *web.Context) error {
+		return c.JSON(map[string]string{"m": "summary"})
+	})
+
+	adminRoutes, err := h.Module("/admin")
+	if err != nil {
+		t.Fatalf("module routes: %v", err)
+	}
+	adminRoutes.Use(traceMiddleware(trace, "admin-mw"))
+	reportRoutes.Use(traceMiddleware(trace, "report-mw"))
+
+	tagged := middlewareController{trace: trace}
+	if err := admin.RegisterController("tagged", tagged); err != nil {
+		t.Fatalf("registering module controller: %v", err)
+	}
+	h.Get("/outside", plainController{}.ActionPing)
+
+	cases := []struct {
+		target string
+		want   []string
+	}{
+		// Explicit submodule route: the ancestors' middleware wraps
+		// outermost, the submodule's innermost.
+		{"/admin/report/summary", []string{"global", "admin-mw", "report-mw"}},
+		// Convention route of the module: module middleware wraps the
+		// controller's, matching the explicit-mount order.
+		{"/admin/tagged/ping", []string{"global", "admin-mw", "controller"}},
+		// Outside the module prefix none of it runs.
+		{"/outside", []string{"global"}},
+	}
+	for _, tc := range cases {
+		res := req(t, h, http.MethodGet, tc.target)
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("%s status = %d, want 200", tc.target, res.StatusCode)
+		}
+		if got := trace.values(); !equalStrings(got, tc.want) {
+			t.Errorf("%s trace = %v, want %v", tc.target, got, tc.want)
+		}
+		trace.b = nil
+	}
+}
+
 func equalStrings(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
