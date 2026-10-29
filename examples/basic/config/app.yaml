@@ -25,6 +25,19 @@ session:
   backend: file
   path: runtime/session
 
+i18n:
+  # Display language for requests that signal no preference; the browser
+  # pages offer a per-session switch (?lang=zh-CN). The message trees are
+  # embedded in the binary (messages/ in main.go), this value only picks the
+  # default display side.
+  language: en-US
+
+mail:
+  # log records every message in the application log (development); switch
+  # to smtp for delivery (see docs/配置参考.md).
+  driver: log
+  from: "goyii basic <no-reply@goyii.example>"
+
 log:
   level: debug
   targets:

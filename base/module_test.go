@@ -152,7 +152,7 @@ func TestModuleConcurrentAccess(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			m.RegisterController("ctrl", &fakeController{}) // duplicate ids are expected to error
+			_ = m.RegisterController("ctrl", &fakeController{}) // duplicate ids are expected to error
 			_, _ = m.Controller("ctrl")
 			_, _ = app.Module("/admin")
 			_ = app.Modules()

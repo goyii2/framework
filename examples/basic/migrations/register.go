@@ -17,5 +17,6 @@ func All() []migrate.Migration {
 		m20260101_000001_create_user_table{},
 		m20260101_000002_create_post_table{},
 		rbac.NewMigration(),
+		m20260101_000004_add_post_timestamps{},
 	}
 }

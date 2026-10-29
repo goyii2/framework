@@ -154,7 +154,8 @@ func TestDefaultIsSingletonAndReplaceable(t *testing.T) {
 	SetDefault(nil)
 	defer SetDefault(nil)
 
-	if Default() != Default() {
+	first, second := Default(), Default()
+	if first != second {
 		t.Error("Default() must return the same instance on repeated calls")
 	}
 

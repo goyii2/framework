@@ -8,6 +8,7 @@ import (
 	z "github.com/Oudwins/zog"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/goyii2/framework/behaviors"
 	"github.com/goyii2/framework/db/ar"
 	"github.com/goyii2/framework/validators"
 )
@@ -69,6 +70,9 @@ func (u *User) CheckPassword(plaintext string) bool {
 
 // Post is the demo's business record. AuthorID is the database-level
 // reference; the Author association is eager-loaded with With("Author").
+// The embedded Hooks dispatcher fans GORM lifecycle events out to the
+// Timestamp behavior, which stamps created_at / updated_at on save — the
+// behaviors a Yii2 model would attach, expressed as struct embedding.
 type Post struct {
 	ar.Model
 	ID       int64  `gorm:"column:id;primaryKey" json:"id"`
@@ -77,6 +81,9 @@ type Post struct {
 	Status   string `gorm:"column:status" json:"status"`
 	AuthorID int64  `gorm:"column:author_id" json:"author_id"`
 	Author   *User  `gorm:"foreignKey:AuthorID" json:"author,omitempty"`
+
+	behaviors.Hooks
+	behaviors.Timestamp
 }
 
 func (Post) TableName() string { return "post" }

@@ -80,6 +80,7 @@ func (o *OptimisticLock) onUpdated(model reflect.Value, tx *gorm.DB) error {
 // live count sits on the database instance that owns the shared statement.
 func rowsAffected(tx *gorm.DB) int64 {
 	if tx.Statement != nil && tx.Statement.DB != nil {
+		//nolint:staticcheck // QF1008 misreads Statement.DB as an embedded field; the selector is deliberate (see comment above)
 		return tx.Statement.DB.RowsAffected
 	}
 	return tx.RowsAffected

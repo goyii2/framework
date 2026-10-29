@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	z "github.com/Oudwins/zog"
@@ -19,6 +20,7 @@ import (
 	"github.com/goyii2/framework/base"
 	"github.com/goyii2/framework/cache"
 	"github.com/goyii2/framework/db/ar"
+	"github.com/goyii2/framework/i18n"
 	"github.com/goyii2/framework/url"
 	"github.com/goyii2/framework/validators"
 	"github.com/goyii2/framework/web"
@@ -74,28 +76,61 @@ var loginSchema = z.Struct(z.Shape{
 
 // ActionLogin authenticates against the user table and binds the account to
 // the session. Unknown users and wrong passwords answer the same 401 — the
-// response must not reveal which half was wrong.
+// response must not reveal which half was wrong. The action serves both
+// shapes of caller: JSON API clients get validated JSON replies, the
+// browser login form is re-rendered with its errors under the failing
+// status and redirected to the post list on success.
 func (site *SiteController) ActionLogin(c *web.Context) error {
 	var payload loginPayload
-	if err := json.NewDecoder(c.Request().Body).Decode(&payload); err != nil {
-		return web.BadRequest("malformed JSON body")
+	if strings.HasPrefix(c.Request().Header.Get("Content-Type"), "application/json") {
+		if err := json.NewDecoder(c.Request().Body).Decode(&payload); err != nil {
+			return web.BadRequest("malformed JSON body")
+		}
+	} else {
+		payload.Username = c.Request().PostFormValue("username")
+		payload.Password = c.Request().PostFormValue("password")
 	}
+
+	html := c.ResponseFormat() == "html"
 	if issues := loginSchema.Validate(&payload); len(issues) > 0 {
+		fields := translateIssues(c.Context(), z.Issues.Flatten(issues))
+		if html {
+			c.SetTitle(i18n.T(c.Context(), "app", "Login", nil))
+			return c.RenderStatus(http.StatusUnprocessableEntity, "site/login", loginData{
+				Action:   url.To("site/login", nil),
+				CSRF:     c.CsrfToken(),
+				Username: payload.Username,
+				Errors:   fields,
+			})
+		}
 		return c.JSONStatus(http.StatusUnprocessableEntity, z.Issues.Flatten(issues))
 	}
 	user, err := ar.New[User](c.Context()).Where("username = ?", payload.Username).One()
 	if err != nil || !user.CheckPassword(payload.Password) {
+		if html {
+			c.SetTitle(i18n.T(c.Context(), "app", "Login", nil))
+			return c.RenderStatus(http.StatusUnauthorized, "site/login", loginData{
+				Action:   url.To("site/login", nil),
+				CSRF:     c.CsrfToken(),
+				Username: payload.Username,
+				Error:    i18n.T(c.Context(), "app", "Wrong username or password.", nil),
+			})
+		}
 		return web.Unauthorized("wrong username or password")
 	}
 	if err := c.User().Login(user); err != nil {
 		return err
 	}
 	c.App().Log().Info("user logged in", "user", user.Username)
+	if html {
+		return c.Redirect(http.StatusFound, url.To("post/list", nil))
+	}
 	return c.JSON(map[string]string{"name": user.Username, "role": user.Role})
 }
 
 // ActionLogout destroys the session: the stored login, the cookie and the
-// request-scoped identity all go away together.
+// request-scoped identity all go away together. Browser submissions land
+// back on the home page; API clients get the bare 204.
 func (site *SiteController) ActionLogout(c *web.Context) error {
 	name := "guest"
 	if id := c.User().Identity(); id != nil {
@@ -103,6 +138,9 @@ func (site *SiteController) ActionLogout(c *web.Context) error {
 	}
 	c.User().Logout()
 	c.App().Log().Info("user logged out", "user", name)
+	if c.ResponseFormat() == "html" {
+		return c.Redirect(http.StatusFound, url.To("site/home", nil))
+	}
 	c.Response().WriteHeader(http.StatusNoContent)
 	return nil
 }

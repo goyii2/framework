@@ -102,8 +102,19 @@ func (d SQLiteDialect) sqliteType(c *ColumnBuilder) (string, error) {
 		return sizedType("VARCHAR", c.size, 255), nil
 	case "char":
 		return sizedType("CHAR", c.size), nil
-	case "text", "tinyText", "mediumText", "longText", "date", "dateTime", "time", "timestamp", "json", "uuid", "enum", "set":
+	case "text", "tinyText", "mediumText", "longText", "json", "uuid", "enum", "set":
 		return "TEXT", nil
+	// SQLite accepts any declared type name and stores temporal values as
+	// text either way, but the declared type is what the sqlite drivers
+	// (glebarez, mattn) key on when scanning the stored text back into
+	// time.Time. Collapsing these to TEXT would silently break every GORM
+	// time-column round-trip, so they keep their temporal names.
+	case "date":
+		return "DATE", nil
+	case "dateTime", "timestamp":
+		return "DATETIME", nil
+	case "time":
+		return "TIME", nil
 	case "binary", "tinyBlob", "mediumBlob", "longBlob":
 		return "BLOB", nil
 	case "float", "double":

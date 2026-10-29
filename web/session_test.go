@@ -315,7 +315,7 @@ func loadSessionRecord(t *testing.T, cfg config.Session, id string) (map[string]
 	t.Helper()
 	if cfg.Backend == "redis" {
 		client := redis.NewClient(&redis.Options{Addr: cfg.Redis.Addr})
-		defer client.Close()
+		defer func() { _ = client.Close() }()
 		b, err := client.Get(t.Context(), "goyii:session:"+id).Bytes()
 		if err == redis.Nil {
 			return nil, false

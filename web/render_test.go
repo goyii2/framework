@@ -64,6 +64,9 @@ func newRenderApp(t *testing.T) *web.Handler {
 	h.Get("/direct", func(c *web.Context) error {
 		return c.RenderComponent(markup("<p>direct</p>"))
 	})
+	h.Get("/rejected", func(c *web.Context) error {
+		return c.RenderStatus(http.StatusUnprocessableEntity, "page/hello", renderViewData{Title: "try again"})
+	})
 	h.Get("/partial", func(c *web.Context) error {
 		c.ClearLayout()
 		return c.RenderComponent(markup("<p>fragment</p>"))
@@ -146,6 +149,24 @@ func TestRenderComponentReturnsFullHTML(t *testing.T) {
 	}
 	if !strings.Contains(b, "<!doctype html>") || !strings.Contains(b, "<p>direct</p>") {
 		t.Errorf("direct render is not a full document:\n%s", b)
+	}
+}
+
+// TestRenderStatusCarriesStatusCode pins the form-re-render path: the reply
+// keeps the explicit status (422 for validation failures), the HTML content
+// type and the layout frame around the re-rendered content.
+func TestRenderStatusCarriesStatusCode(t *testing.T) {
+	h := newRenderApp(t)
+	res, b := get(t, h, "/rejected")
+
+	if res.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want %d", res.StatusCode, http.StatusUnprocessableEntity)
+	}
+	if ct := res.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Fatalf("content type = %q, want text/html", ct)
+	}
+	if !strings.Contains(b, "<!doctype html>") || !strings.Contains(b, "<h1>try again</h1>") {
+		t.Errorf("framed content missing:\n%s", b)
 	}
 }
 

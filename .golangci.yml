@@ -6,6 +6,25 @@ version: "2"
 
 linters:
   default: standard
+  settings:
+    errcheck:
+      # 按函数名精确豁免不适用于跨包方法（sql.Rows 等匹配不到），
+      # 尽力而为调用的豁免统一走下方 exclusions.rules。
+      exclude-functions:
+        - (io.Closer).Close
+  exclusions:
+    rules:
+      # 收尾/清理路径上"尽力而为"调用的豁免（项目约定）：
+      # - defer 收尾与临时文件清理的 Close：失败不影响主流程
+      # - fmt.Fprint* 写 stdout/stderr：失败无处可报
+      # - os.Remove / os.RemoveAll：清理删除，缺文件/被占用是可接受结局
+      # 个别需要明示意图的调用点用 `_ =` 赋值，不走本规则。
+      - linters: [errcheck]
+        text: 'Error return value of `.+(\.Close|\.Flush)` is not checked'
+      - linters: [errcheck]
+        text: 'Error return value of `fmt\.Fprint(f|ln)?` is not checked'
+      - linters: [errcheck]
+        text: 'Error return value of `os\.Remove(All)?` is not checked'
 
 formatters:
   enable:

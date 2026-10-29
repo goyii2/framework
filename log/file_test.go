@@ -143,7 +143,7 @@ func TestFileTargetConcurrentWrites(t *testing.T) {
 		go func(g int) {
 			defer wg.Done()
 			for i := 0; i < perGoroutine; i++ {
-				target.Write(Record{
+				_ = target.Write(Record{
 					Time:    time.Now(),
 					Level:   slog.LevelInfo,
 					Message: fmt.Sprintf("g%02d-i%02d", g, i),

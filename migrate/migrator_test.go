@@ -420,12 +420,6 @@ func (s *fakeSQLState) execQueries() []string {
 	return queries
 }
 
-func (s *fakeSQLState) execRecords() []fakeExecRecord {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return append([]fakeExecRecord(nil), s.execs...)
-}
-
 func (s *fakeSQLState) lockQueries() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()

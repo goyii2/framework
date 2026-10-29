@@ -199,9 +199,9 @@ resp="$(curl -s -w '\n%{http_code}' -D "$TMP/create.headers" -o "$TMP/create.bod
     -H 'Content-Type: application/json' -H "X-Csrf-Token: $TA" \
     -d '{"title":"First post","body":"hello world","status":"published"}')"
 expect_status "create succeeds" 201 "${resp##*$'\n'}"
-expect_contains "Location header via named route" "$(cat "$TMP/create.headers")" 'Location: /post/2'
+expect_contains "Location header via named route" "$(cat "$TMP/create.headers")" 'Location: /post/26'
 
-body="$(curl -s "$BASE/post/2")"
+body="$(curl -s "$BASE/post/26")"
 expect_contains "view eager-loads the author" "$body" '"author"'
 
 cache="$(curl -s -D - -o /dev/null "$BASE/post" | grep -i '^x-cache:' | tr -d '\r')"
@@ -209,12 +209,12 @@ expect_contains "list rebuilt after data change" "$cache" "MISS"
 cache="$(curl -s -D - -o /dev/null "$BASE/post" | grep -i '^x-cache:' | tr -d '\r')"
 expect_contains "list served from cache" "$cache" "HIT"
 
-resp="$(curl -s -w '\n%{http_code}' -b "$JA" -X PUT "$BASE/post/2" \
+resp="$(curl -s -w '\n%{http_code}' -b "$JA" -X PUT "$BASE/post/26" \
     -H 'Content-Type: application/json' -H "X-Csrf-Token: $TA" \
     -d '{"title":"x","status":"draft"}')"
 expect_status "invalid update rejected by validation" 422 "${resp##*$'\n'}"
 
-resp="$(curl -s -w '\n%{http_code}' -b "$JA" -X PUT "$BASE/post/2" \
+resp="$(curl -s -w '\n%{http_code}' -b "$JA" -X PUT "$BASE/post/26" \
     -H 'Content-Type: application/json' -H "X-Csrf-Token: $TA" \
     -d '{"title":"First post (edited)","status":"draft"}')"
 expect_status "update succeeds" 200 "${resp##*$'\n'}"
@@ -232,15 +232,15 @@ code="$(curl -s -o /dev/null -w '%{http_code}' -b "$JD" -c "$JD" -X POST "$BASE/
     -d '{"username":"demo","password":"demo123"}')"
 expect_status "demo login succeeds" 200 "$code"
 
-code="$(curl -s -o /dev/null -w '%{http_code}' -b "$JD" -X DELETE "$BASE/post/2" \
+code="$(curl -s -o /dev/null -w '%{http_code}' -b "$JD" -X DELETE "$BASE/post/26" \
     -H "X-Csrf-Token: $TD")"
 expect_status "AccessControl: non-admin delete rejected" 403 "$code"
 
-code="$(curl -s -o /dev/null -w '%{http_code}' -b "$JA" -X DELETE "$BASE/post/2" \
+code="$(curl -s -o /dev/null -w '%{http_code}' -b "$JA" -X DELETE "$BASE/post/26" \
     -H "X-Csrf-Token: $TA")"
 expect_status "admin delete succeeds" 204 "$code"
 
-code="$(curl -s -o /dev/null -w '%{http_code}' "$BASE/post/2")"
+code="$(curl -s -o /dev/null -w '%{http_code}' "$BASE/post/26")"
 expect_status "deleted post is gone" 404 "$code"
 
 code="$(curl -s -o /dev/null -w '%{http_code}' -b "$JA" -c "$JA" -X POST "$BASE/logout" \

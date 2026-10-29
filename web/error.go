@@ -124,9 +124,10 @@ func (h *Handler) renderError(c *Context, err error) {
 
 	name := http.StatusText(status)
 	asJSON := true
-	if c.format == "html" {
+	switch c.format {
+	case "html":
 		asJSON = false
-	} else if c.format == "" {
+	case "":
 		asJSON = wantsJSON(c.r.Header.Get("Accept"))
 	}
 	if asJSON {

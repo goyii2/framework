@@ -1,6 +1,9 @@
-// The basic example is the P0 walkthrough application: configuration
-// assembly, migrations, seeding, session login and a validated CRUD API with
-// access control, CSRF, negotiated errors, logging and caching all live.
+// The basic example is the P0+P1 walkthrough application: configuration
+// assembly, migrations, seeding, session login, a validated CRUD API with
+// access control, CSRF, negotiated errors, logging and caching — and the
+// browser face on top: templ pages with layout and widgets, RBAC menus,
+// translated interface and validation messages, a paginated sortable list,
+// detail and edit forms, automatic timestamps and the mailer.
 //
 // Run it from this directory:
 //
@@ -15,6 +18,7 @@ package main
 
 import (
 	"context"
+	"embed"
 	"fmt"
 	"os"
 	"strconv"
@@ -23,6 +27,7 @@ import (
 	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/console"
 	"github.com/goyii2/framework/db/ar"
+	"github.com/goyii2/framework/i18n"
 	migratecommands "github.com/goyii2/framework/migrate/commands"
 	"github.com/goyii2/framework/rbac"
 	"github.com/goyii2/framework/url"
@@ -30,6 +35,13 @@ import (
 
 	"github.com/goyii2/framework/examples/basic/migrations"
 )
+
+// messages holds the translation trees the i18n middleware resolves:
+// messages/<lang>/<category>.json, embedded so the single binary carries
+// every language.
+//
+//go:embed messages
+var messages embed.FS
 
 func main() {
 	// runtime/ holds the sqlite database, the log file, session records and
@@ -47,6 +59,7 @@ func main() {
 	}
 	app := base.New(cfg)
 	base.SetDefault(app) // background code without a request context resolves this instance
+	app.SetI18n(i18n.NewMessageSource(messages))
 
 	handler := web.NewHandler(app)
 	handler.SessionManager().IdentityFinder = findIdentity(app)
@@ -64,6 +77,7 @@ func main() {
 	}
 	handler.SetAuthManager(auth)
 	registerRoutes(handler, app, auth)
+	registerViews(handler.Views())
 	url.SetDefault(handler.URLs()) // url.To resolves this handler's named routes
 
 	con := console.New(app, console.WithHandler(handler))
@@ -75,30 +89,50 @@ func main() {
 	}
 }
 
-// registerRoutes wires the URL space. Explicit bindings cover the API;
-// /site/index stays unbound on purpose so it resolves through the
+// registerRoutes wires the URL space. Two families live side by side: the
+// /post JSON API of the P0 walkthrough and the /posts browser pages of the
+// P1 face; /site/index stays unbound on purpose so it resolves through the
 // convention fallback (/{controller}/{action} over the root registry).
 func registerRoutes(h *web.Handler, app *base.Application, auth *rbac.DbManager) {
-	// Error responses negotiate JSON/HTML from the Accept header, and write
-	// requests must carry a JSON body (anything else answers 415).
+	// Error responses negotiate JSON/HTML from the Accept header; write
+	// requests carry a JSON body (API) or a form-encoded one (browser
+	// pages), anything else answers 415.
 	h.Use(web.ContentNegotiator{
 		ResponseFormats: []web.Format{
 			{Type: "application/json", Format: "json"},
 			{Type: "text/html", Format: "html"},
 		},
-		RequestFormats: []web.Format{{Type: "application/json", Format: "json"}},
+		RequestFormats: []web.Format{
+			{Type: "application/json", Format: "json"},
+			{Type: "application/x-www-form-urlencoded", Format: "form"},
+		},
 	}.Middleware())
+	// The application frame wraps every HTML render (pages and error
+	// pages alike); JSON replies never render, so it stays dormant there.
+	h.Use(pageLayout())
 
 	site := &SiteController{}
 	post := &PostController{Auth: auth}
 
 	sc := h.Ctrl(site)
+	sc.Get("/", site.ActionHome).Name("site/home")
 	sc.Get("/site/csrf", site.ActionCsrf).Name("site/csrf")
-	sc.Post("/login", site.ActionLogin).Name("site/login")
+	sc.Get("/login", site.ActionLoginForm).Name("site/login")
+	sc.Post("/login", site.ActionLogin)
 	sc.Post("/logout", site.ActionLogout).Name("site/logout")
 	sc.Get("/me", site.ActionMe).Name("site/me")
+	sc.Post("/site/notify", site.ActionNotify).Name("site/notify")
 
 	pc := h.Ctrl(post)
+	// Browser pages.
+	pc.Get("/posts", post.ActionList).Name("post/list")
+	pc.Get("/posts/new", post.ActionNew).Name("post/new")
+	pc.Post("/posts", post.ActionStore).Name("post/store")
+	pc.Get("/posts/{id:[0-9]+}", post.ActionShow).Name("post/show")
+	pc.Get("/posts/{id:[0-9]+}/edit", post.ActionEdit).Name("post/edit")
+	pc.Post("/posts/{id:[0-9]+}", post.ActionSave).Name("post/save")
+	pc.Post("/posts/{id:[0-9]+}/delete", post.ActionDestroy).Name("post/destroy")
+	// JSON API.
 	pc.Get("/post", post.ActionIndex).Name("post/index")
 	pc.Get("/post/{id:[0-9]+}", post.ActionView).Name("post/view")
 	pc.Post("/post", post.ActionCreate).Name("post/create")
@@ -106,6 +140,9 @@ func registerRoutes(h *web.Handler, app *base.Application, auth *rbac.DbManager)
 	pc.Delete("/post/{id:[0-9]+}", post.ActionDelete).Name("post/delete")
 
 	if err := app.RegisterController("site", site); err != nil {
+		fail(err)
+	}
+	if err := app.RegisterController("post", post); err != nil {
 		fail(err)
 	}
 }
