@@ -1,6 +1,6 @@
 # 22: P1 集成验证
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 **What to build:** examples/basic 升级为 P1 完整体：templ 页面（Layout + Widget）、登录后按 RBAC 差异化导航、i18n 语言切换、分页列表页；docs/ 补齐 P0+P1 完整使用文档；README 正式化。
 
