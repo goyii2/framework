@@ -1,6 +1,6 @@
 # 21: mail 组件
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 **What to build:** Mailer 抽象 + SMTP 实现：消息构造（收发件人/主题/正文/附件）与发送接口，经 Application 取用；开发态提供 log Mailer（不外发，完整消息落日志），生产态 SMTP。
 
