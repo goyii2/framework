@@ -156,6 +156,16 @@ type activeOptionView struct {
 	selected bool
 }
 
+// resolveOptions marks the option matching the echoed value — the shared
+// choice-resolution of ActiveForm fields and GridView filter selects.
+func resolveOptions(options []FieldOption, value string) []activeOptionView {
+	resolved := make([]activeOptionView, 0, len(options))
+	for _, opt := range options {
+		resolved = append(resolved, activeOptionView{value: opt.Value, label: opt.Label, selected: value == opt.Value})
+	}
+	return resolved
+}
+
 func (f ActiveForm) prepared() activeFormView {
 	id := f.ID
 	if id == "" {
@@ -204,10 +214,7 @@ func (f ActiveForm) preparedField(field ActiveField, formID string, errs map[str
 	}
 	switch FieldType(typ) {
 	case FieldSelect, FieldRadio:
-		v.options = make([]activeOptionView, 0, len(field.Options))
-		for _, opt := range field.Options {
-			v.options = append(v.options, activeOptionView{value: opt.Value, label: opt.Label, selected: value == opt.Value})
-		}
+		v.options = resolveOptions(field.Options, value)
 	case FieldCheckbox:
 		// A checkbox submits its value when checked and nothing when not,
 		// so any echoed value means it was checked.

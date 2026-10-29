@@ -1,0 +1,21 @@
+package view
+
+// listView renders the list container: the summary line, the item views in
+// order (or the empty placeholder), then the pagination bar.
+templ listView(v listViewView) {
+	<div class="list-view">
+		if v.showRange {
+			<div class="summary">Showing <b>{ v.rangeLabel }</b> of <b>{ v.totalLabel }</b> items.</div>
+		} else {
+			<div class="summary">Total <b>0</b> items.</div>
+		}
+		if v.empty {
+			<div class="empty">{ v.emptyText }</div>
+		} else {
+			for _, item := range v.items {
+				<div class="item">@item</div>
+			}
+		}
+		@v.pager
+	</div>
+}

@@ -46,7 +46,7 @@ res, err := dataprovider.ArrayDataProvider[*Item]{
 
 排序在副本上进行（调用方切片顺序不变），稳定排序；类型不合法即报错，不静默猜。
 
-## Result：响应与 LinkPager 共用
+## Result：响应与列表 widget 共用
 
 ```go
 type Result[T any] struct {
@@ -58,7 +58,7 @@ type Result[T any] struct {
 }
 ```
 
-API 直接 `c.JSON(res)`；页面侧 `res.Pagination()` 映射到 `view.Pagination` 供 [LinkPager](组件-view与templ.md) 消费——两处分页语义锁死一致（1-based）。
+API 直接 `c.JSON(res)`；页面侧 `res.Pagination()` 映射到 `view.Pagination` 供 [LinkPager 与列表大件 GridView/ListView](组件-view与templ.md) 消费——两处分页语义锁死一致（1-based）。列表 widget 是纯渲染，取数始终走本文的 provider。
 
 ```go
 pager := view.LinkPager{

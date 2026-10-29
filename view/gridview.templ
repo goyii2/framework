@@ -1,0 +1,84 @@
+package view
+
+// gridView renders the outer shell: a GET form when any column declared a
+// filter (the filter row's inputs need one to submit with), the bare table
+// otherwise.
+templ gridView(v gridViewView) {
+	if v.form {
+		<form method="get">
+			@gridTable(v)
+		</form>
+	} else {
+		@gridTable(v)
+	}
+}
+
+// gridTable renders the grid table: the header row with its sort links, the
+// optional filter row and the body rows, or the empty-state placeholder.
+templ gridTable(v gridViewView) {
+	<table class="table table-striped table-bordered grid-view">
+		<thead>
+			<tr>
+				for _, h := range v.headers {
+					if h.sortURL != "" {
+						<th class={ h.class }><a href={ templ.URL(h.sortURL) }>{ h.label }</a></th>
+					} else {
+						<th>{ h.label }</th>
+					}
+				}
+			</tr>
+			if v.hasFilters {
+				<tr class="filters">
+					for _, f := range v.filters {
+						@gridFilterCell(f)
+					}
+				</tr>
+			}
+		</thead>
+		<tbody>
+			if v.empty {
+				<tr><td colspan={ v.colspan } class="empty">{ v.emptyText }</td></tr>
+			} else {
+				for _, row := range v.rows {
+					<tr>
+						for _, cell := range row {
+							@gridCell(cell)
+						}
+					</tr>
+				}
+			}
+		</tbody>
+	</table>
+}
+
+// gridFilterCell renders one cell of the filter row: a select when the
+// filter declares options, a typed input otherwise; an unconfigured cell
+// renders empty to keep the row aligned with the columns.
+templ gridFilterCell(f filterCellView) {
+	if f.name == "" {
+		<td></td>
+	} else {
+		<td>
+			if f.typ == "select" {
+				<select name={ f.name } class="form-control">
+					for _, opt := range f.options {
+						<option value={ opt.value } selected?={ opt.selected }>{ opt.label }</option>
+					}
+				</select>
+			} else {
+				<input type={ f.typ } name={ f.name } class="form-control" value={ f.value }/>
+			}
+		</td>
+	}
+}
+
+// gridCell renders one body cell wrapped in its td: an inline component
+// (escaped text, or raw markup when the column opted into FormatHTML), an
+// empty cell when nothing was computed.
+templ gridCell(c gridCellView) {
+	if c.component != nil {
+		<td>@c.component</td>
+	} else {
+		<td>{ c.text }</td>
+	}
+}

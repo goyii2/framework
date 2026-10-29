@@ -33,7 +33,7 @@ flowchart LR
 
 应用级公共外框 = 装配一段全局中间件给每个请求 SetLayout（`examples/basic` 的做法；布局闭包捕获请求 Context，菜单可见性随身份/权限/语言变化）。`c.ClearLayout()` 输出裸片段。嵌套模块下子模块经自己的 registrar 设 `Layout` 即覆写父模块的框架，父模块路由不受影响。
 
-## Widget 四件
+## Widget 一览
 
 结构体配置 + `Render() templ.Component`，可在 Go 里组装、也可在 templ 里 `@` 内嵌：
 
@@ -43,12 +43,53 @@ flowchart LR
 | `view.Breadcrumbs` | `Links []Crumb{Label, URL}` | URL 为空的 crumb 即当前页（unlinked + active） |
 | `view.LinkPager` | `Pagination, URL func(page int), MaxButtonCount, 首末页标签, HideOnSinglePage` | 消费 `view.Pagination{TotalCount, PerPage, Page}`（1-based）；URL 缺省 `?page=N` |
 | `view.DetailView` | `Rows []DetailRow{Label, Value}` | Value：组件内联 / nil 空格 / 其余 `fmt.Sprint`，全部自动转义 |
+| `view.ActiveForm` | `Fields, Errors, Values, CSRF...` | 服务端表单，回显 validators 校验错误与提交值 |
+| `view.GridView` | `Columns []DataColumn{Attr, Label, Format, Value, Sortable, Filter}, ItemCount, Item, Sort, SortURL, FilterValues` | 列表大件之一，见下节 |
+| `view.ListView` | `Pagination, ItemCount, Item, ItemView, Pager` | 列表大件之一，见下节 |
 
 ```go
 detail := view.DetailView{Rows: []view.DetailRow{
     {Label: "Title", Value: post.Title},
     {Label: "Author", Value: author},
 }}.Render()
+```
+
+## 列表大件：GridView / ListView
+
+两个列表 widget 都是**纯渲染**：输入是 action 里 `Prepare()` 好的 `dataprovider.Result`，widget 不取数。泛型条目经 `Item func(i int) any` 闭包桥接（`func(i int) any { return res.Items[i] }`），分页元数据经 `res.Pagination()` 映射成 `view.Pagination`：
+
+```go
+params, _ := dataprovider.FromRequest(c.Request(), "id", "created_at") // 列白名单在这里声明
+res := provider.Prepare(ctx, params)
+q := c.Request().URL.Query()
+
+grid := view.GridView{
+    Columns: []view.DataColumn{
+        {Attr: "id", Sortable: true, Value: func(item any) any { return item.(Post).ID }},
+        {Attr: "title", Label: "标题", Value: func(item any) any { return item.(Post).Title }},
+    },
+    ItemCount:    len(res.Items),
+    Item:         func(i int) any { return res.Items[i] },
+    Sort:         q.Get("sort"),
+    FilterValues: view.QueryValues(c.Request(), "title"),
+}
+```
+
+- **列格式**：`Format` 默认转义（`FormatText`）；`FormatHTML` 显式 opt-in 才透传原始 HTML；`Value` 返回 `templ.Component` 时内联渲染，nil 渲染空单元格。
+- **排序**：`Sortable` 列头渲染升/降切换链接，值走 dataprovider 既有 `sort=-created_at,id` 约定；widget 只给 `Sortable` 列出链接（widget 侧的列白名单），URL 缺省 `?sort=...`，`SortURL` 回调可保留当前查询串。
+- **过滤分工**：widget 只负责渲染 GET 过滤行（`Filter: &ColumnFilter{Type, Options}`，text/select 等）并回显当前值（`FilterValues`，可 `view.QueryValues(r, names...)` 从请求取）；**查询组装归 action**——读 query 自行 `Where` 后再 `Prepare`，不引入 SearchModel。
+- **空数据态**：`Items` 为空时渲染占位行（`EmptyText` 可配，默认 "No results found."）。
+
+ListView = item 模板 + Summary + 分页，分页直接复用 `LinkPager`（`Pagination` 自动取列表自己的，URL 回调由调用方给）：
+
+```go
+list := view.ListView{
+    Pagination: res.Pagination(),
+    ItemCount:  len(res.Items),
+    Item:       func(i int) any { return res.Items[i] },
+    ItemView:   func(item any) templ.Component { return postRow(item.(Post)) },
+    Pager:      view.LinkPager{URL: func(page int) string { return url.To("post/index", url.P{"page": page}) }},
+}
 ```
 
 ## 分页联动
