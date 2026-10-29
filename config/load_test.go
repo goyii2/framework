@@ -384,3 +384,53 @@ func TestMutexEnvOverrides(t *testing.T) {
 		t.Errorf("MUTEX_DRIVER override not applied: %+v", cfg.Mutex)
 	}
 }
+
+func TestLoadQueueSection(t *testing.T) {
+	dir := t.TempDir()
+	appYAML := `
+app:
+  name: queuedemo
+queue:
+  driver: db
+  tableName: jobs
+  pollIntervalMs: 250
+`
+	if err := os.WriteFile(filepath.Join(dir, "app.yaml"), []byte(appYAML), 0o644); err != nil {
+		t.Fatalf("writing app.yaml: %v", err)
+	}
+
+	cfg, err := LoadEnv(dir, "dev")
+	if err != nil {
+		t.Fatalf("LoadEnv: %v", err)
+	}
+	if cfg.Queue != (Queue{Driver: "db", TableName: "jobs", PollIntervalMs: 250}) {
+		t.Errorf("queue section = %+v", cfg.Queue)
+	}
+}
+
+func TestQueueDefaults(t *testing.T) {
+	cfg := WithDefaults(Config{})
+	if cfg.Queue.Driver != "sync" {
+		t.Errorf("default queue driver = %q, want sync", cfg.Queue.Driver)
+	}
+	if cfg.Queue.TableName != "queue" {
+		t.Errorf("default queue table = %q, want queue", cfg.Queue.TableName)
+	}
+	if cfg.Queue.PollIntervalMs != 1000 {
+		t.Errorf("default poll interval = %d, want 1000", cfg.Queue.PollIntervalMs)
+	}
+}
+
+func TestQueueEnvOverrides(t *testing.T) {
+	t.Setenv("QUEUE_DRIVER", "redis")
+	t.Setenv("QUEUE_TABLENAME", "jobs")
+	t.Setenv("QUEUE_POLLINTERVALMS", "250")
+
+	cfg, err := LoadEnv("testdata", "dev")
+	if err != nil {
+		t.Fatalf("LoadEnv: %v", err)
+	}
+	if cfg.Queue.Driver != "redis" || cfg.Queue.TableName != "jobs" || cfg.Queue.PollIntervalMs != 250 {
+		t.Errorf("QUEUE_* overrides not applied: %+v", cfg.Queue)
+	}
+}

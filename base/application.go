@@ -14,6 +14,7 @@ import (
 	"github.com/goyii2/framework/log"
 	"github.com/goyii2/framework/mail"
 	"github.com/goyii2/framework/mutex"
+	"github.com/goyii2/framework/queue"
 )
 
 // Application is the process-level component container. Components are
@@ -31,6 +32,7 @@ type Application struct {
 	mutexComp *component[mutex.Mutex]
 	i18nComp  *component[*i18n.MessageSource]
 	mailComp  *component[mail.Mailer]
+	queueComp *component[*queue.Queue]
 	events    eventRegistry
 	modules   moduleRegistry
 
@@ -54,7 +56,7 @@ func New(cfg config.Config) *Application {
 		}, slow)))
 	}
 	redisComp := newComponent(func() redis.UniversalClient { return newDefaultRedis(cfg.Redis) })
-	return &Application{
+	a := &Application{
 		cfg:       cfg,
 		log:       logComp,
 		db:        db.NewComponent(cfg.DB, dbOpts...),
@@ -64,6 +66,13 @@ func New(cfg config.Config) *Application {
 		i18nComp:  newComponent(func() *i18n.MessageSource { return newDefaultI18n(cfg) }),
 		mailComp:  newComponent(func() mail.Mailer { return newDefaultMail(cfg, logComp) }),
 	}
+	// The queue factory closes over the application itself, to route the
+	// queue's lifecycle events into this application's registry; it only
+	// runs on first Queue() access, after a is fully assembled.
+	a.queueComp = newComponent(func() *queue.Queue {
+		return newDefaultQueue(cfg.Queue, a.db, a.redisComp, a)
+	})
+	return a
 }
 
 // Config returns the application configuration.

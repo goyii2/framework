@@ -18,6 +18,7 @@ type Config struct {
 	Redis   Redis   `yaml:"redis"`
 	Cache   Cache   `yaml:"cache"`
 	Mutex   Mutex   `yaml:"mutex"`
+	Queue   Queue   `yaml:"queue"`
 	Log     Log     `yaml:"log"`
 	Session Session `yaml:"session"`
 	I18n    I18n    `yaml:"i18n"`
@@ -68,6 +69,18 @@ type Cache struct {
 // takes no values of its own here.
 type Mutex struct {
 	Driver string `yaml:"driver"` // process | redis; default process
+}
+
+// Queue holds the queue component values. The db driver stores messages in
+// TableName (create it with queue.NewMigration); the redis driver shares the
+// application's redis connection (the top-level redis section) and takes no
+// values of its own here.
+type Queue struct {
+	Driver    string `yaml:"driver"`    // sync | db | redis; default sync
+	TableName string `yaml:"tableName"` // db driver table; default queue
+	// PollIntervalMs is how long the listen worker waits between drain
+	// passes when idle; a short value trades CPU for latency in tests.
+	PollIntervalMs int `yaml:"pollIntervalMs"`
 }
 
 // Log holds the logging component values.
@@ -197,6 +210,15 @@ func WithDefaults(cfg Config) Config {
 	}
 	if cfg.Mutex.Driver == "" {
 		cfg.Mutex.Driver = "process"
+	}
+	if cfg.Queue.Driver == "" {
+		cfg.Queue.Driver = "sync"
+	}
+	if cfg.Queue.TableName == "" {
+		cfg.Queue.TableName = "queue"
+	}
+	if cfg.Queue.PollIntervalMs == 0 {
+		cfg.Queue.PollIntervalMs = 1000
 	}
 	if cfg.Session.Name == "" {
 		cfg.Session.Name = "goyii-session"

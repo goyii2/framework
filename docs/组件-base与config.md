@@ -20,6 +20,7 @@ base.SetDefault(app)                  // 无请求上下文的代码（console/�
 | `app.Redis() redis.UniversalClient` | 共享 redis 连接 | 按顶层 `redis` 段；cache/session 的 redis 后端共用（各自 `redis:` 子段非空则另开专用连接，`app.RedisFor(section)`） |
 | `app.Cache() cache.Cache` | 缓存 | memory / file / redis 按 `cache.driver` |
 | `app.Mutex() mutex.Mutex` | 互斥锁 | process / redis 按 `mutex.driver`（redis 用共享连接） |
+| `app.Queue() *queue.Queue` | 异步队列 | sync / db / redis 按 `queue.driver`（redis 用共享连接） |
 | `app.Log() base.Log` / `app.Logger() *log.Logger` | 日志 | 按 `log` 段的 Target 列表 |
 | `app.I18n() *i18n.MessageSource` | 翻译源 | 读 `i18n.messagesDir` 目录 |
 | `app.Mailer() mail.Mailer` | 邮件 | log 驱动（smtp 按 `mail` 段） |
@@ -43,6 +44,39 @@ defer release()
 - 长于 `ttl` 的工作分段重取：锁定 -> 做一段有界工作 -> release -> 再取锁继续；分段点也是领导权可能易手处。
 - release 幂等，TTL 过期后调用也无害——redis 驱动按获取令牌校验后才删键，晚到的 release 不会误删后来者的锁。
 - process 驱动是进程内跨 goroutine 的按名锁；redis 驱动（`mutex.driver: redis`）跨进程，走顶层共享 redis 连接。
+
+
+## Queue：异步队列
+
+对应 Yii2 的 `yii\queue`，但任务代码不随队列出进程——push 只存**注册名 + JSON 载荷**，worker 按名从应用级注册表重建后执行：
+
+```go
+// 任务：具名 + 载荷走导出字段（JSON 序列化）
+type EmailJob struct {
+    To      string `json:"to"`
+    Subject string `json:"subject"`
+}
+func (j *EmailJob) Name() string            { return "email" }
+func (j *EmailJob) Execute(ctx context.Context) error { /* 发信 */ return nil }
+
+// 启动时注册（console 与 web 共用同一 app）
+app.Queue().Jobs().Register(&EmailJob{})
+
+// 请求里推送：可延迟、可优先级、可重试
+app.Queue().Push(ctx, &EmailJob{To: "a@b.c", Subject: "hi"},
+    queue.WithDelay(time.Hour),      // 默认立即
+    queue.WithPriority(5),           // 默认 0，高者优先
+    queue.WithAttempts(3),           // 默认 1；总尝试次数（含首次）
+    queue.WithTTR(10*time.Minute),   // 默认 5m；保留超时，超时自动回炉
+    queue.WithBackoff(myBackoff),    // 默认 2^attempt 秒封顶 15m
+)
+```
+
+- **状态机**：waiting -> reserved -> done；失败且还有尝试次数 -> 按退避延迟重回 waiting；尝试耗尽 -> failed 保留。reserved 超 TTR（worker 崩溃）自动回炉 waiting。
+- **worker**：`queue/listen` 常驻（SIGINT/SIGTERM 优雅退出）、`queue/run` 单轮（cron 式）、`queue/retry` 重推 failed（尝试次数归零）——`queue/commands` 提供，挂载方式同 migrate：`console.AddCommand(queuecommands.New(app))`。
+- **事件**：`queue.EventBeforePush / AfterPush / BeforeExec / AfterExec / ExecError` 五个走 `app.On` / `app.Trigger`（Data 为 `queue.PushEventData` / `queue.ExecEventData`）。
+- **驱动**：`sync` 即推即执行、失败直接返错（开发/测试默认，零外部依赖）；`db` 建表存消息（`queue.NewMigration(cfg.Queue.TableName)` 并入应用迁移列表），SQLite 即可覆盖零依赖场景；`redis` 跨进程走共享连接。sync 驱动忽略 Attempts/重试——没有存储就没有重试。
+- **退避**：默认 `2^attempt` 秒（attempt 为刚失败的尝试序号）封顶 15 分钟；自定义函数在 push 时解析成延迟表随消息存储，跨进程重试不依赖闭包。
 
 
 ## context 携带
