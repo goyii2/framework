@@ -60,6 +60,7 @@ flowchart LR
 | RBAC | 自建轻量 DbManager | 四表 Yii2 语义（见 ADR-0003） |
 | 缓存/会话 Redis | `github.com/redis/go-redis/v9` | cache 接口实现之一 |
 | i18n 格式化 | `golang.org/x/text` | 日期/数字/货币 Formatter |
+| authclient | `golang.org/x/oauth2` | P2 第三方登录薄封装（provider 接口 + GitHub/Google 内置） |
 
 ## 需求清单（分期）
 
@@ -84,9 +85,20 @@ flowchart LR
 - **mail**：Mailer 抽象 + SMTP 实现
 - **常用行为**：Timestamp / Blameable / Sluggable / OptimisticLock，以 GORM 钩子与可复用结构体内嵌实现
 
-### P2 生态（做，但最后）
+### P2 生态（做，但最后；语义已拷问定稿）
 
-queue、debug 调试面板、Gii 代码生成器（cobra 子命令生成 model/CRUD/controller）、Vite manifest 集成（hash URL + dev server 代理）、服务端渲染 Widget 的最小资源注册表（如出现）、redis/mongo/es 扩展对应物、mutex（进程内 + redis 分布式锁）、PageCache、GridView/ListView/ActiveForm 服务端渲染大件（客户端校验另议）、httpclient/authclient 等扩展对应物按需评估、嵌套 Module 完整验证、Casbin 适配器（社区位）
+- **queue**：Application 组件；Job 接口（`Name()` + `Execute(ctx)`）+ 应用级注册表，push 时 JSON 序列化载荷、worker 按名重建（与 RBAC「规则存名」同理）；驱动 sync/db/redis（file 不做，db+SQLite 覆盖零依赖场景）；Push options：Delay/Priority/Attempts/TTR/Backoff（默认 Attempts=1、TTR=5m、退避 `2^attempt` 秒封顶 15m）；重试耗尽置 failed 保留、`queue/retry` 重推，reserved 超 TTR 自动回炉；worker 子命令 listen/run/retry 由 `queue/commands` 提供（对齐 migrate/commands 先例）；push/exec 前后五事件走 base 事件调度
+- **mutex**：Application 组件；`Lock(ctx, name, ttl) (release, error)` / `TryLock`，不可重入；实现 process（按名锁）+ redis（SET NX PX + 唯一 token + Lua 校验释放；不自动续期，长持锁分段重取）
+- **redis 共享连接**：config 增顶层可选 Redis 段，Cache/Session 各自段降为可选覆盖（空则继承顶层）；Application 懒初始化共享 redis 连接组件（未配置且无人用时零开销），cache/session redis 后端、mutex、queue 复用；config 增 `Queue{Driver, TableName, PollIntervalMs}` 与 `Mutex{Driver}` 段
+- **debug 面板**：debug 包；middleware 仅 App.Debug 时挂，按请求聚合七面板（请求/路由、日志、SQL、时间线、Session/User、配置摘要-脱敏、邮件）；每请求 JSON 落 `runtime/debug/`、默认保留 200 个；内嵌 `/debug` 历史 + 详情 + 页底 toolbar（仅 200 的 text/html 响应注入）；默认仅本机 IP，可配 CIDR 列表
+- **PageCache**：web Filter（形态对齐 HttpCache）：Duration/Dependency/VaryBy，缓存 200 GET 文本响应的 body+status+Content-Type，key = 路由 + 规范化查询 + VaryBy，失效走 cache.Dependency；debug 注入在其内层
+- **GridView/ListView**：现有 widget 形态，输入为 `Prepare()` 后的 dataprovider.Result（纯渲染不取数）；`DataColumn{Attr, Label, Format(默认转义), Value, Sortable, Filter}`，排序走既有 sort 参数与列白名单；过滤行渲染归 widget、查询组装归 action（读 query 自行 Where，不引入 SearchModel）；ListView = item 模板 + Summary + 复用 LinkPager
+- **ActiveForm**：服务端渲染（ActiveField label/input/hint/error）+ validators.Errors 自动回显 + 既有 CSRF；客户端校验不做规则导出（zog 无公开内省 API），input 原生属性（required/maxlength 等）由 field 配置显式写；JS 校验需求走前端自行实现
+- **Gii**：`goyii gii model|controller|crud` 子命令（gii 包）；GORM Migrator 读表结构，model 生成内嵌 ar.Model 的 struct + `Rules()` 骨架（NOT NULL→required、长度→max，猜不准留空注释）；crud 生成 model + controller + `.templ` 视图（list 用 GridView、form 用 ActiveForm）并提示运行 templ generate；input 类型按列猜（TEXT→textarea、数值→number、bool→checkbox、时间→datetime-local、其余 text）；text/template + embed，`--templates` 目录可覆盖；纯 flags 无交互向导
+- **Vite 集成**：vite 包；manifest.json 解析 + `vite.Entry(name)` 产带 hash 的 script/link templ 组件（含依赖 CSS）；dev 模式直连 localhost:5173 + 注入 `@vite/client`；ReverseProxy middleware 转发静态前缀（含 ws/HMR）；不做 AssetManager 与通用资源注册表
+- **authclient**：基于 golang.org/x/oauth2 的薄封装：provider 接口（BuildAuthURL/Exchange/FetchIdentity）+ 内置 GitHub/Google，与 web Identity 登录联动；不进 examples 主线，docs 教程 + mock OAuth 单测交付
+- **嵌套 Module**：RegisterModule 落地（前缀拼接、controller 分层查找、命名路由自动带模块路径如 `admin/user/view`）；补模块级中间件 ModuleRoutes.Use（对应 Yii2 module beforeAction）；不做模块级组件隔离；examples 加二级嵌套 demo + 单测（路由/反向生成/Layout 继承）
+- **Casbin 适配器**：本仓库不实现（ADR-0003 维持），交付 docs「自定义 AuthManager 适配指南」（接口契约 + 适配器骨架）
 
 ## 关键 API 形态（共识样例）
 
@@ -122,7 +134,10 @@ goyii migrate up && goyii migrate redo 1
 | Behavior 动态挂接 | GORM 钩子 + 结构体内嵌 | 动态挂接需反射/map，损类型安全 |
 | ServiceLocator / DI 容器 | 强类型 Application + 构造注入 | ADR-0001 |
 | UrlManager 规则逐条匹配 | 显式绑定 + 命名路由 + 约定回退 | ADR-0002（chi 同时出局） |
-| AssetManager | go:embed 直接引用；P2 Vite manifest 触发式补 | 资源发布问题在 Go 下不存在 |
+| AssetManager / AssetBundle / Widget 资源注册表 | go:embed 直接引用 + P2 Vite manifest 集成 | 资源发布问题在 Go 下不存在；客户端校验不内建，注册表无消费方 |
+| Yii2 Mutex 可重入语义 | 不可重入 Lock/TryLock + 显式 TTL | Go 下按名可重入不安全也不惯用 |
+| 客户端校验规则自动导出 | 服务端校验 + 错误回显，input 原生属性显式配置 | zog 无公开内省 API，导出不可靠 |
+| httpclient / mongo / es 扩展对应物 | net/http 直接用；NoSQL 场景用官方 client | Go 标准生态已完备；AR 绑 SQL 语义 |
 | Casbin 作默认 RBAC | 自建 DbManager + AuthManager 接口留适配位 | ADR-0003（语义结构性错位） |
 | Yii2 Rule 类（库存可执行规则） | 规则代码内定义、库中存名字 | Go 无代码序列化执行，存名对齐 |
 | GORM AutoMigrate | yiimigrate 版本化 DDL | ADR-0004 |
@@ -136,7 +151,7 @@ goyii migrate up && goyii migrate redo 1
 
 ## 开放问题
 
-- P2 各项（queue 语义、Gii 模板形态、Vite 集成深度、多存储扩展范围）进入实施前单独拷问
+- ~~P2 各项（queue 语义、Gii 模板形态、Vite 集成深度、多存储扩展范围）进入实施前单独拷问~~ 定稿：grill 会话逐项拷问完成，语义见「P2 生态」节与放弃清单；wontfix 四项——httpclient、mongo/es 对应物、Widget 资源注册表、Casbin 实现
 - yiimigrate 并入后原仓库去留（归档或停止演进）——待用户决定
 - 错误处理器输出协商的细节规则（Accept 头优先级、HTML 错误页模板覆盖机制）实现时定
 - `web.Context` 与 `context.Context` 的互转便利方法命名，实现时定
