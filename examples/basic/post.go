@@ -1,17 +1,16 @@
-// The browser-facing actions: pages built on the templ view layer, the
-// data provider, the widgets and the RBAC manager. They live beside the
-// JSON API actions of controllers.go and share the same models and access
-// rules; the write pages additionally gate on the RBAC permissions the seed
-// grants through the role hierarchy (editor writes, admin also deletes).
-// The P2 face rides here too: the listing renders through the GridView
-// widget (sortable headers + filter row), the create/edit forms through
-// ActiveForm, and the queue and page-cache demo pages close the loop with
-// the worker and cache components.
+// PostController: the business CRUD. The JSON API actions exercise the
+// AccessControl rules, scenario validation on save and the dependency-cached
+// list endpoint; the browser pages render through the P2 face — the GridView
+// listing (sortable headers + filter row) and the ActiveForm create/edit
+// forms. The write pages gate on the RBAC permissions the seed grants
+// through the role hierarchy (editor writes, admin also deletes).
 package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -19,15 +18,39 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/goyii2/framework/base"
+	"github.com/goyii2/framework/cache"
 	"github.com/goyii2/framework/dataprovider"
 	"github.com/goyii2/framework/db/ar"
 	"github.com/goyii2/framework/i18n"
-	"github.com/goyii2/framework/mail"
 	"github.com/goyii2/framework/url"
 	"github.com/goyii2/framework/validators"
 	"github.com/goyii2/framework/view"
 	"github.com/goyii2/framework/web"
 )
+
+// PostController serves the business CRUD. Its access rules are the
+// AccessControl demonstration: reading is public (guest "?" and logged-in
+// "@" alike), writing needs a login, deleting asks the RBAC manager for the
+// post/delete permission (granted through the admin role's hierarchy, not
+// through the identity's own role column), and anything no rule covers is
+// denied.
+type PostController struct {
+	web.Controller
+
+	// Auth is the RBAC manager deciding the concrete role names below.
+	Auth web.AccessChecker
+}
+
+func (pc *PostController) Middleware() []web.Middleware {
+	return []web.Middleware{
+		web.AccessControl{Auth: pc.Auth, Rules: []web.AccessRule{
+			{Allow: true, Roles: []string{"?", "@"}, Verbs: []string{http.MethodGet, http.MethodHead}},
+			{Allow: true, Roles: []string{"@"}, Verbs: []string{http.MethodPost, http.MethodPut}},
+			{Allow: true, Roles: []string{"post/delete"}, Verbs: []string{http.MethodDelete}},
+		}}.Middleware(),
+	}
+}
 
 // sortablePostFields is the whitelist the listing accepts sort requests
 // for. A request naming anything else answers 400 before any SQL is built.
@@ -36,66 +59,158 @@ var sortablePostFields = []string{"id", "title", "status", "created_at"}
 // listPerPage is the page size of the browser listing.
 const listPerPage = 10
 
-// translateIssues maps a field -> messages set through the message source,
-// so messages an inline zog schema produced localize the same way model
-// rules do (the automatic translation sits in the model save pipeline).
-func translateIssues(ctx context.Context, fields map[string][]string) map[string][]string {
-	out := make(map[string][]string, len(fields))
-	for field, msgs := range fields {
-		translated := make([]string, len(msgs))
-		for i, msg := range msgs {
-			translated[i] = i18n.T(ctx, "app", msg, nil)
-		}
-		out[field] = translated
-	}
-	return out
-}
+// postListCacheKey is the cache key of the list endpoint.
+const postListCacheKey = "post-list"
 
-// ActionHome is the browser front page: an introduction, the entry links
-// and the mailer demonstration button.
-func (site *SiteController) ActionHome(c *web.Context) error {
-	c.SetTitle(i18n.T(c.Context(), "app", "Home", nil))
-	return c.Render("site/home", homeData{
-		SignedIn:  c.User() != nil && c.User().Identity() != nil,
-		PostsURL:  url.To("post/list", nil),
-		LoginURL:  url.To("site/login", nil),
-		NotifyURL: url.To("site/notify", nil),
-		CSRF:      c.CsrfToken(),
-	})
-}
+// ActionIndex lists the newest posts. The list is cached for one minute
+// behind a value dependency on the table's max id: creating or deleting a
+// post changes the dependency, the entry is judged stale and rebuilt on the
+// next read. The X-Cache response header and the cache-category log record
+// make the hit/miss outcome observable.
+func (pc *PostController) ActionIndex(c *web.Context) error {
+	ctx := c.Context()
+	dep := cache.NewValueDependency(postMaxID(ctx))
 
-// ActionLoginForm renders the login page. The form posts back to /login,
-// carrying the CSRF token in the hidden field the middleware verifies.
-func (site *SiteController) ActionLoginForm(c *web.Context) error {
-	c.SetTitle(i18n.T(c.Context(), "app", "Login", nil))
-	return c.Render("site/login", loginData{
-		Action: url.To("site/login", nil),
-		CSRF:   c.CsrfToken(),
-	})
-}
-
-// ActionNotify demonstrates the mail component: it composes a message with
-// the chain builder and hands it to the application's mailer. The default
-// log driver records the complete message in the application log — the
-// development counterpart of an SMTP delivery.
-func (site *SiteController) ActionNotify(c *web.Context) error {
-	recipient := "guest@example.com"
-	if identity := c.User().Identity(); identity != nil {
-		recipient = identity.GetName() + "@example.com"
-	}
-	subject := i18n.T(c.Context(), "app", "A test email from {app}",
-		map[string]any{"app": c.App().Config().App.Name})
-	body := i18n.T(c.Context(), "app", "This message was composed by the mail example of the basic application.", nil)
-	msg := mail.NewMessage().
-		SetFrom("goyii basic <no-reply@goyii.example>").
-		SetTo(recipient).
-		SetSubject(subject).
-		SetTextBody(body)
-	if err := c.App().Mailer().Send(c.Context(), msg); err != nil {
+	rebuilt := false
+	var posts []Post
+	err := c.App().Cache().GetOrSet(ctx, postListCacheKey, &posts,
+		func(ctx context.Context) (any, error) {
+			rebuilt = true
+			rows, err := ar.New[Post](ctx).OrderBy("id DESC").Limit(50).All()
+			if err != nil {
+				return nil, err
+			}
+			return rows, nil
+		},
+		time.Minute, dep)
+	if err != nil {
 		return err
 	}
-	c.SetTitle(i18n.T(c.Context(), "app", "Mail sent", nil))
-	return c.Render("site/notify", notifyData{Recipient: recipient, HomeURL: url.To("site/home", nil)})
+
+	state := "HIT"
+	if rebuilt {
+		state = "MISS"
+	}
+	c.App().Logger().Log(slog.LevelDebug, "cache", "post list served", "state", state, "dependency", postMaxID(ctx))
+	c.Response().Header().Set("X-Cache", state)
+	return c.JSON(posts)
+}
+
+// ActionView fetches one post with its author eager-loaded (With), the
+// Active Record association preload.
+func (pc *PostController) ActionView(c *web.Context) error {
+	id, err := c.ParamInt("id")
+	if err != nil {
+		return web.NotFound("post not found")
+	}
+	post, err := ar.New[Post](c.Context()).With("Author").Where("id = ?", id).One()
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return web.NotFound("post not found")
+	}
+	if err != nil {
+		return err
+	}
+	return c.JSON(post)
+}
+
+// postPayload is the request body of the write actions.
+type postPayload struct {
+	Title  string `json:"title"`
+	Body   string `json:"body"`
+	Status string `json:"status"`
+}
+
+// ActionCreate inserts a post. Save runs the insert scenario first: a body
+// the rules reject never reaches the database and comes back as 422 with the
+// field -> messages map.
+func (pc *PostController) ActionCreate(c *web.Context) error {
+	var payload postPayload
+	if err := json.NewDecoder(c.Request().Body).Decode(&payload); err != nil {
+		return web.BadRequest("malformed JSON body")
+	}
+	author, ok := c.User().Identity().(*User)
+	if !ok || author == nil {
+		return web.Unauthorized("authentication required")
+	}
+	post := ar.New[Post](c.Context()).New()
+	post.Title, post.Body, post.Status = payload.Title, payload.Body, payload.Status
+	post.AuthorID = author.ID
+	if err := post.Save(); err != nil {
+		var verrs *validators.Errors
+		if errors.As(err, &verrs) {
+			return c.JSONStatus(http.StatusUnprocessableEntity, verrs.Fields)
+		}
+		return err
+	}
+	// Reverse URL generation: the named route fills the path parameter.
+	c.Response().Header().Set("Location", url.To("post/view", url.P{"id": strconv.FormatInt(post.ID, 10)}))
+	return c.JSONStatus(http.StatusCreated, post)
+}
+
+// ActionUpdate rewrites a post. The update scenario validates the payload;
+// a row that vanished between read and write answers 404.
+func (pc *PostController) ActionUpdate(c *web.Context) error {
+	id, err := c.ParamInt("id")
+	if err != nil {
+		return web.NotFound("post not found")
+	}
+	post, err := ar.FindByID[Post](c.Context(), id)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return web.NotFound("post not found")
+	}
+	if err != nil {
+		return err
+	}
+	var payload postPayload
+	if err := json.NewDecoder(c.Request().Body).Decode(&payload); err != nil {
+		return web.BadRequest("malformed JSON body")
+	}
+	post.Title, post.Body, post.Status = payload.Title, payload.Body, payload.Status
+	if err := post.Save(); err != nil {
+		var verrs *validators.Errors
+		if errors.As(err, &verrs) {
+			return c.JSONStatus(http.StatusUnprocessableEntity, verrs.Fields)
+		}
+		return err
+	}
+	return c.JSON(post)
+}
+
+// ActionDelete removes a post. Only holders of the post/delete permission
+// get here — the access rules already rejected everyone else with 403, and
+// the seed grants it through the admin role's hierarchy.
+func (pc *PostController) ActionDelete(c *web.Context) error {
+	id, err := c.ParamInt("id")
+	if err != nil {
+		return web.NotFound("post not found")
+	}
+	post, err := ar.FindByID[Post](c.Context(), id)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return web.NotFound("post not found")
+	}
+	if err != nil {
+		return err
+	}
+	if err := post.Delete(); err != nil {
+		return err
+	}
+	c.Response().WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+// postMaxID reports the highest post id, the value the list cache depends
+// on. A production table would use a version counter or max(updated_at)
+// instead — anything that moves when the data does.
+func postMaxID(ctx context.Context) int64 {
+	conn, err := base.FromContext(ctx).DB()
+	if err != nil {
+		return -1
+	}
+	var maxID int64
+	if err := conn.Raw("SELECT COALESCE(MAX(id), 0) FROM post").Scan(&maxID).Error; err != nil {
+		return -1
+	}
+	return maxID
 }
 
 // requirePermission gates a page action on an RBAC item: guests are sent to
@@ -507,114 +622,4 @@ func replayPostForm(c *web.Context, editing bool, input postFormInput, err error
 		return err
 	}
 	return renderPostForm(c, editing, http.StatusUnprocessableEntity, input, verrs)
-}
-
-// QueueController serves the queue demo page: the live state of the queue
-// table, a button that pushes a demo email job, and the worker commands that
-// drain it. The push is the producer side of the demo; the consumption runs
-// out-of-band through `goyii queue run` or `queue listen` — the page links
-// to the records those runs leave in the application log.
-type QueueController struct {
-	web.Controller
-}
-
-// ActionIndex renders the queue page. A just-pushed job id arrives through
-// the pushed query parameter (the push action redirects back post/redirect/
-// get) and confirms the enqueue.
-func (qc *QueueController) ActionIndex(c *web.Context) error {
-	ctx := c.Context()
-	status, err := readQueueStatus(ctx)
-	if err != nil {
-		return err
-	}
-	t := func(msgID string) string { return i18n.T(ctx, "app", msgID, nil) }
-	c.SetTitle(t("Queue"))
-	return c.Render("queue/index", queuePageData{
-		Waiting:  strconv.FormatInt(status.Waiting, 10),
-		Reserved: strconv.FormatInt(status.Reserved, 10),
-		Failed:   strconv.FormatInt(status.Failed, 10),
-		PushedID: c.Request().URL.Query().Get("pushed"),
-		PushURL:  url.To("queue/push", nil),
-		CSRF:     c.CsrfToken(),
-	})
-}
-
-// ActionPush enqueues one demo email job. The recipient is optional (the
-// signed-in account's address is the default); the push redirects back to
-// the queue page carrying the message id, so the waiting count ticks up
-// visibly before a worker drains it.
-func (qc *QueueController) ActionPush(c *web.Context) error {
-	recipient := strings.TrimSpace(c.Request().PostFormValue("to"))
-	if recipient == "" {
-		recipient = "guest@example.com"
-		if identity := c.User().Identity(); identity != nil {
-			recipient = identity.GetName() + "@example.com"
-		}
-	}
-	job := &EmailJob{
-		To:      recipient,
-		Subject: "A queued notification from the basic demo",
-		Body:    "This message was pushed from the queue page and delivered by a queue worker.",
-	}
-	id, err := c.App().Queue().Push(c.Context(), job)
-	if err != nil {
-		return err
-	}
-	c.App().Log().Info("demo job pushed", "job", job.Name(), "id", id, "to", recipient)
-	return c.Redirect(http.StatusFound,
-		url.To("queue/index", url.P{"pushed": strconv.FormatInt(id, 10)}))
-}
-
-// CacheController demonstrates the PageCache filter: its one page renders a
-// generation timestamp, and the whole response — status, Content-Type, body
-// — is replayed from the cache while the entry lives.
-type CacheController struct {
-	web.Controller
-}
-
-// pageCacheTTL bounds how long a rendered demo page stays cached. Short on
-// purpose: the second request inside the window replays the very same
-// timestamp, and once the entry expires the page renders fresh again.
-const pageCacheTTL = 3 * time.Second
-
-// Middleware caches the controller's pages with web.PageCache. VaryBy keys
-// the entry by the two request-dependent parts the page frame carries — the
-// display language and the signed-in account — so a copy cached for one
-// visitor never replays to another.
-func (cc *CacheController) Middleware() []web.Middleware {
-	return []web.Middleware{web.PageCache{
-		Duration: pageCacheTTL,
-		VaryBy:   pageCacheVary,
-	}.Middleware()}
-}
-
-// pageCacheVary derives the cache-key segment of one request: language plus
-// user id (guests share one variant). It runs inside the pipeline, so the
-// request Context carries both.
-func pageCacheVary(r *http.Request) string {
-	c := web.FromContext(r.Context())
-	if c == nil {
-		return ""
-	}
-	lang, _ := i18n.LanguageFromContext(c.Context())
-	user := "guest"
-	if c.User() != nil {
-		if id := c.User().Identity(); id != nil {
-			user = id.GetID()
-		}
-	}
-	return lang + "|" + user
-}
-
-// ActionDemo renders the page-cache demonstration page. The rendered-at
-// timestamp is the observable: it freezes while a cached copy is replayed
-// and moves again once the entry expired.
-func (cc *CacheController) ActionDemo(c *web.Context) error {
-	generated := time.Now().Format(time.RFC3339Nano)
-	ctx := c.Context()
-	c.SetTitle(i18n.T(ctx, "app", "Page cache", nil))
-	return c.Render("site/pagecache", pageCacheData{
-		GeneratedAt: generated,
-		TTL:         pageCacheTTL.String(),
-	})
 }
