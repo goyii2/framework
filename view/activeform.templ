@@ -1,0 +1,53 @@
+package view
+
+import "strconv"
+
+// activeForm renders the form element: the CSRF hidden field the web.Csrf
+// filter verifies, then the fields in order. Hidden fields are bare inputs;
+// every other field goes through activeField.
+templ activeForm(form activeFormView) {
+	<form id={ form.id } action={ templ.URL(form.action) } method={ form.method }>
+		if form.csrf != "" {
+			<input type="hidden" name={ form.csrfName } value={ form.csrf }/>
+		}
+		for _, f := range form.fields {
+			if f.typ == "hidden" {
+				<input type="hidden" name={ f.name } value={ f.value }/>
+			} else {
+				@activeField(f)
+			}
+		}
+	</form>
+}
+
+// activeField renders one field: the group wrapper, the label, the control
+// for its type, the hint line and each validation message.
+templ activeField(f activeFieldView) {
+	<div class={ fieldClasses(f) }>
+		<label class="control-label" for={ f.id }>{ f.label }</label>
+		switch f.typ {
+			case "textarea":
+				<textarea id={ f.id } class="form-control" name={ f.name } if f.required { required } if f.maxLength > 0 { maxlength={ strconv.Itoa(f.maxLength) } } if f.placeholder != "" { placeholder={ f.placeholder } }>{ f.value }</textarea>
+			case "select":
+				<select id={ f.id } class="form-control" name={ f.name } if f.required { required }>
+					for _, opt := range f.options {
+						<option value={ opt.value } selected?={ opt.selected }>{ opt.label }</option>
+					}
+				</select>
+			case "checkbox":
+				<input type="checkbox" id={ f.id } name={ f.name } value="1" checked?={ f.checked } if f.required { required }/>
+			case "radio":
+				for _, opt := range f.options {
+					<label class="radio"><input type="radio" name={ f.name } value={ opt.value } checked?={ opt.selected } if f.required { required }/> { opt.label }</label>
+				}
+			default:
+				<input type={ f.typ } id={ f.id } class="form-control" name={ f.name } if f.typ != "file" { value={ f.value } } if f.required { required } if f.placeholder != "" { placeholder={ f.placeholder } } if f.maxLength > 0 { maxlength={ strconv.Itoa(f.maxLength) } } if f.pattern != "" { pattern={ f.pattern } }/>
+		}
+		if f.hint != "" {
+			<div class="hint-block">{ f.hint }</div>
+		}
+		for _, msg := range f.errors {
+			<div class="help-block">{ msg }</div>
+		}
+	</div>
+}
