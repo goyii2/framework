@@ -16,6 +16,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/wneessen/go-mail v0.8.1
 	golang.org/x/crypto v0.55.0
+	golang.org/x/oauth2 v0.37.0
 	golang.org/x/text v0.41.0
 	gorm.io/driver/mysql v1.6.0
 	gorm.io/driver/postgres v1.6.3
