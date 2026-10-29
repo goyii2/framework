@@ -1,6 +1,6 @@
 # 30: ActiveForm
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 **What to build:** 服务端活动表单 widget：ActiveForm + ActiveField（label/input/hint/error 渲染），从 validators.Errors 自动回显字段错误并回填提交值，与既有 CSRF 联动。input 原生校验属性（required/maxlength/pattern 等）由字段配置显式声明——不做校验规则自动导出（zog 无公开内省 API，见 PRD 放弃清单），JS 客户端校验不在框架内。
 
