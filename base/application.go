@@ -13,6 +13,7 @@ import (
 	"github.com/goyii2/framework/i18n"
 	"github.com/goyii2/framework/log"
 	"github.com/goyii2/framework/mail"
+	"github.com/goyii2/framework/mutex"
 )
 
 // Application is the process-level component container. Components are
@@ -27,6 +28,7 @@ type Application struct {
 	db        *db.Component
 	redisComp *component[redis.UniversalClient]
 	cacheComp *component[cache.Cache]
+	mutexComp *component[mutex.Mutex]
 	i18nComp  *component[*i18n.MessageSource]
 	mailComp  *component[mail.Mailer]
 	events    eventRegistry
@@ -58,6 +60,7 @@ func New(cfg config.Config) *Application {
 		db:        db.NewComponent(cfg.DB, dbOpts...),
 		redisComp: redisComp,
 		cacheComp: newComponent(func() cache.Cache { return newDefaultCache(cfg.Cache, redisComp) }),
+		mutexComp: newComponent(func() mutex.Mutex { return newDefaultMutex(cfg.Mutex, redisComp) }),
 		i18nComp:  newComponent(func() *i18n.MessageSource { return newDefaultI18n(cfg) }),
 		mailComp:  newComponent(func() mail.Mailer { return newDefaultMail(cfg, logComp) }),
 	}

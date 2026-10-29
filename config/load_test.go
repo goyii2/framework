@@ -344,3 +344,43 @@ func TestRedisDefaults(t *testing.T) {
 		t.Errorf("WithDefaults must not invent redis values, got %+v", cfg.Redis)
 	}
 }
+
+func TestLoadMutexSection(t *testing.T) {
+	dir := t.TempDir()
+	appYAML := `
+app:
+  name: mutexdemo
+mutex:
+  driver: redis
+`
+	if err := os.WriteFile(filepath.Join(dir, "app.yaml"), []byte(appYAML), 0o644); err != nil {
+		t.Fatalf("writing app.yaml: %v", err)
+	}
+
+	cfg, err := LoadEnv(dir, "dev")
+	if err != nil {
+		t.Fatalf("LoadEnv: %v", err)
+	}
+	if cfg.Mutex != (Mutex{Driver: "redis"}) {
+		t.Errorf("mutex section = %+v", cfg.Mutex)
+	}
+}
+
+func TestMutexDefaults(t *testing.T) {
+	cfg := WithDefaults(Config{})
+	if cfg.Mutex.Driver != "process" {
+		t.Errorf("default mutex driver = %q, want process", cfg.Mutex.Driver)
+	}
+}
+
+func TestMutexEnvOverrides(t *testing.T) {
+	t.Setenv("MUTEX_DRIVER", "redis")
+
+	cfg, err := LoadEnv("testdata", "dev")
+	if err != nil {
+		t.Fatalf("LoadEnv: %v", err)
+	}
+	if cfg.Mutex.Driver != "redis" {
+		t.Errorf("MUTEX_DRIVER override not applied: %+v", cfg.Mutex)
+	}
+}

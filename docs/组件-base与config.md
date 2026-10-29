@@ -19,11 +19,31 @@ base.SetDefault(app)                  // 无请求上下文的代码（console/�
 | `app.DB() (*db.Conn, error)` | 数据库连接 | 按 `db.driver/dsn` 建立 |
 | `app.Redis() redis.UniversalClient` | 共享 redis 连接 | 按顶层 `redis` 段；cache/session 的 redis 后端共用（各自 `redis:` 子段非空则另开专用连接，`app.RedisFor(section)`） |
 | `app.Cache() cache.Cache` | 缓存 | memory / file / redis 按 `cache.driver` |
+| `app.Mutex() mutex.Mutex` | 互斥锁 | process / redis 按 `mutex.driver`（redis 用共享连接） |
 | `app.Log() base.Log` / `app.Logger() *log.Logger` | 日志 | 按 `log` 段的 Target 列表 |
 | `app.I18n() *i18n.MessageSource` | 翻译源 | 读 `i18n.messagesDir` 目录 |
 | `app.Mailer() mail.Mailer` | 邮件 | log 驱动（smtp 按 `mail` 段） |
 
 每个组件都有对应 `SetXxx` 替换位（如 `app.SetI18n(i18n.NewMessageSource(embedded))`），测试注入 fake 或换实现都走它；传 nil 还原懒初始化默认。
+
+## Mutex：按名互斥锁
+
+对应 Yii2 的 `yii\mutex`，但**不可重入**（Go 下按名可重入不安全也不惯用，不复刻）：
+
+```go
+release, err := app.Mutex().Lock(ctx, "report-generator", 30*time.Second)
+if err != nil { return err }
+defer release()
+
+// ...临界区...
+```
+
+- `TryLock` 同形：名被占立即返回 `mutex.ErrLocked`，不等待。
+- `ttl` 到期锁自动放（redis 服务端键过期 / process 定时器），不自动续期；持有方崩溃也不会永久堵死他人。
+- 长于 `ttl` 的工作分段重取：锁定 -> 做一段有界工作 -> release -> 再取锁继续；分段点也是领导权可能易手处。
+- release 幂等，TTL 过期后调用也无害——redis 驱动按获取令牌校验后才删键，晚到的 release 不会误删后来者的锁。
+- process 驱动是进程内跨 goroutine 的按名锁；redis 驱动（`mutex.driver: redis`）跨进程，走顶层共享 redis 连接。
+
 
 ## context 携带
 

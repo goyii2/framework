@@ -17,6 +17,7 @@ type Config struct {
 	DB      DB      `yaml:"db"`
 	Redis   Redis   `yaml:"redis"`
 	Cache   Cache   `yaml:"cache"`
+	Mutex   Mutex   `yaml:"mutex"`
 	Log     Log     `yaml:"log"`
 	Session Session `yaml:"session"`
 	I18n    I18n    `yaml:"i18n"`
@@ -60,6 +61,13 @@ type Cache struct {
 	TTL       int    `yaml:"ttl"`       // seconds; default lifetime when a caller passes ttl <= 0
 	Path      string `yaml:"path"`      // file backend storage directory
 	Redis     Redis  `yaml:"redis"`
+}
+
+// Mutex holds the mutex component values. The redis driver draws the
+// application's shared redis connection (the top-level redis section); it
+// takes no values of its own here.
+type Mutex struct {
+	Driver string `yaml:"driver"` // process | redis; default process
 }
 
 // Log holds the logging component values.
@@ -186,6 +194,9 @@ func WithDefaults(cfg Config) Config {
 	}
 	if cfg.Cache.Path == "" {
 		cfg.Cache.Path = filepath.Join(os.TempDir(), "goyii-cache")
+	}
+	if cfg.Mutex.Driver == "" {
+		cfg.Mutex.Driver = "process"
 	}
 	if cfg.Session.Name == "" {
 		cfg.Session.Name = "goyii-session"
