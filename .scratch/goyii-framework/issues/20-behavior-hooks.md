@@ -1,6 +1,6 @@
 # 20: 常用行为钩子
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 **What to build:** Yii2 常用 Behavior 四件的替代物（PRD 放弃动态 Behavior 后的落地形态：结构体内嵌 + GORM 钩子）：Timestamp（自动填充创建/更新时间）、Blameable（经当前 Identity 填充操作人）、Sluggable（生成唯一 slug）、OptimisticLock（版本冲突检测）。
 
