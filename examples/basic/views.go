@@ -77,17 +77,21 @@ type sortHeader struct {
 	Arrow string
 }
 
-// postsListData drives the listing page.
+// postsListData drives the listing page. Query is the active search text —
+// echoed into the search box and switched on for the empty-search hint — and
+// SearchAction the endpoint the GET form submits to.
 type postsListData struct {
-	Rows        []postRow
-	Total       int
-	Pager       templ.Component
-	SortID      sortHeader
-	SortTitle   sortHeader
-	SortStatus  sortHeader
-	SortCreated sortHeader
-	CanCreate   bool
-	CreateURL   string
+	Rows         []postRow
+	Total        int
+	Pager        templ.Component
+	SortID       sortHeader
+	SortTitle    sortHeader
+	SortStatus   sortHeader
+	SortCreated  sortHeader
+	CanCreate    bool
+	CreateURL    string
+	SearchAction string
+	Query        string
 }
 
 // postShowData drives the detail page.

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"gorm.io/gorm"
 
@@ -116,9 +117,28 @@ func can(c *web.Context, item string) bool {
 // postID formats a row id for URL parameters.
 func postID(post *Post) string { return strconv.FormatInt(post.ID, 10) }
 
+// likeEscapeClause is the escape declaration every LIKE of the listing
+// search carries; the pattern builder below escapes with the same character.
+const likeEscapeClause = ` ESCAPE '\'`
+
+// likeEscaper neutralizes the LIKE wildcards (and the escape character
+// itself) in one pass, so each character the user typed keeps its literal
+// meaning inside the pattern and cannot reshape the match.
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
+// likePattern wraps raw input into a contains-match pattern whose interior
+// is fully escaped: "%"/"_" match only themselves, exactly like the rest of
+// the text. Bound as a statement parameter — never concatenated.
+func likePattern(raw string) string {
+	return "%" + likeEscaper.Replace(raw) + "%"
+}
+
 // ActionList is the browser listing: an ActiveDataProvider pushes the
 // pagination and the whitelisted sort down to SQL, the LinkPager widget
 // renders the paging bar and every column heading links its sort toggle.
+// The q parameter narrows the row set — a filter the base query carries, so
+// the count, the page fetch and every pager/sort link stay consistent with
+// it.
 func (pc *PostController) ActionList(c *web.Context) error {
 	params, err := dataprovider.FromRequest(c.Request(), sortablePostFields...)
 	if err != nil {
@@ -129,8 +149,16 @@ func (pc *PostController) ActionList(c *web.Context) error {
 		// query string still wins (the parser already clamped it).
 		params.PerPage = listPerPage
 	}
+
+	search := strings.TrimSpace(c.Request().URL.Query().Get("q"))
+	query := ar.New[Post](c.Context()).With("Author")
+	if search != "" {
+		pattern := likePattern(search)
+		query = query.Where("(title LIKE ?"+likeEscapeClause+
+			" OR body LIKE ?"+likeEscapeClause+")", pattern, pattern)
+	}
 	res, err := dataprovider.ActiveDataProvider[Post]{
-		Query:        ar.New[Post](c.Context()).With("Author"),
+		Query:        query,
 		Params:       params,
 		DefaultOrder: []dataprovider.Sort{{Column: "id", Desc: true}},
 	}.Prepare()
@@ -138,8 +166,8 @@ func (pc *PostController) ActionList(c *web.Context) error {
 		return err
 	}
 
-	// The pager keeps the active sort across pages; the numbered buttons
-	// address pages, the sort toggles restart from page one.
+	// The pager keeps the active sort and search across pages; the numbered
+	// buttons address pages, the sort toggles restart from page one.
 	sortParam := c.Request().URL.Query().Get("sort")
 	pager := view.LinkPager{
 		Pagination:     res.Pagination(),
@@ -148,6 +176,9 @@ func (pc *PostController) ActionList(c *web.Context) error {
 			p := url.P{"page": strconv.Itoa(page)}
 			if sortParam != "" {
 				p["sort"] = sortParam
+			}
+			if search != "" {
+				p["q"] = search
 			}
 			return url.To("post/list", p)
 		},
@@ -177,23 +208,26 @@ func (pc *PostController) ActionList(c *web.Context) error {
 
 	c.SetTitle(i18n.T(ctx, "app", "Posts", nil))
 	return c.Render("post/list", postsListData{
-		Rows:        rows,
-		Total:       res.TotalCount,
-		Pager:       pager,
-		SortID:      sortToggle(c, "id", params),
-		SortTitle:   sortToggle(c, "title", params),
-		SortStatus:  sortToggle(c, "status", params),
-		SortCreated: sortToggle(c, "created_at", params),
-		CanCreate:   can(c, "post/create"),
-		CreateURL:   url.To("post/new", nil),
+		Rows:         rows,
+		Total:        res.TotalCount,
+		Pager:        pager,
+		SortID:       sortToggle("id", params, search),
+		SortTitle:    sortToggle("title", params, search),
+		SortStatus:   sortToggle("status", params, search),
+		SortCreated:  sortToggle("created_at", params, search),
+		CanCreate:    can(c, "post/create"),
+		CreateURL:    url.To("post/new", nil),
+		SearchAction: url.To("post/list", nil),
+		Query:        search,
 	})
 }
 
 // sortToggle builds one column heading: the link flips the column's
 // direction (ascending first, the leading "-" inverts a column already
-// sorted ascending) and the arrow marks the active direction.
-func sortToggle(c *web.Context, column string, params dataprovider.Params) sortHeader {
-	h := sortHeader{URL: url.To("post/list", url.P{"sort": column})}
+// sorted ascending), the arrow marks the active direction, and an active
+// search rides along so sorting never drops the filter.
+func sortToggle(column string, params dataprovider.Params, search string) sortHeader {
+	h := sortHeader{URL: listSortURL(column, false, search)}
 	for _, s := range params.Sort {
 		if s.Column != column {
 			continue
@@ -202,10 +236,24 @@ func sortToggle(c *web.Context, column string, params dataprovider.Params) sortH
 			h.Arrow = " ↓"
 		} else {
 			h.Arrow = " ↑"
-			h.URL = url.To("post/list", url.P{"sort": "-" + column})
+			h.URL = listSortURL(column, true, search)
 		}
 	}
 	return h
+}
+
+// listSortURL renders the sort-toggle URL of one column, keeping the active
+// search in the query string.
+func listSortURL(column string, desc bool, search string) string {
+	value := column
+	if desc {
+		value = "-" + column
+	}
+	p := url.P{"sort": value}
+	if search != "" {
+		p["q"] = search
+	}
+	return url.To("post/list", p)
 }
 
 // findPost loads the post addressed by the id path parameter with its

@@ -37,6 +37,8 @@ templ appShell(nav navData, title string, content templ.Component) {
 				.error { color: #b91c1c; }
 				form label { display: block; margin: 0.8rem 0; font-weight: 600; }
 				form label span.error { display: block; font-weight: 400; }
+				form.search { display: flex; gap: 0.4rem; margin: 0.8rem 0; }
+				form.search input[type=search] { padding: 0.35rem; font: inherit; box-sizing: border-box; width: 16rem; max-width: 60vw; }
 				input[type=text], input[type=password], select, textarea { display: block; width: 100%; max-width: 30rem; margin-top: 0.25rem; padding: 0.35rem; font: inherit; box-sizing: border-box; }
 				textarea { max-width: 40rem; }
 				button { padding: 0.35rem 1rem; font: inherit; cursor: pointer; }
@@ -128,6 +130,10 @@ templ loginPage(d loginData) {
 
 templ postsPage(d postsListData) {
 	<h1>{ i18n.T(ctx, "app", "Posts", nil) }</h1>
+	<form class="search" method="get" action={ templ.URL(d.SearchAction) }>
+		<input type="search" name="q" value={ d.Query } placeholder={ i18n.T(ctx, "app", "Search posts", nil) }/>
+		<button type="submit">{ i18n.T(ctx, "app", "Search", nil) }</button>
+	</form>
 	<p class="meta">
 		{ i18n.T(ctx, "app", "Total {n} posts", map[string]any{"n": d.Total}) }
 		if d.CanCreate {
@@ -135,7 +141,11 @@ templ postsPage(d postsListData) {
 		}
 	</p>
 	if len(d.Rows) == 0 {
-		<p>{ i18n.T(ctx, "app", "No posts yet.", nil) }</p>
+		if d.Query != "" {
+			<p>{ i18n.T(ctx, "app", "No posts match your search.", nil) }</p>
+		} else {
+			<p>{ i18n.T(ctx, "app", "No posts yet.", nil) }</p>
+		}
 	} else {
 		<table>
 			<thead>
