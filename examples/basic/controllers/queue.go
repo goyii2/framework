@@ -1,13 +1,15 @@
 // QueueController: the queue demo page — the live state of the queue table,
 // a button that pushes a demo email job, and the worker commands that drain
 // it out-of-band.
-package main
+package controllers
 
 import (
 	"net/http"
 	"strconv"
 	"strings"
 
+	"github.com/goyii2/framework/examples/basic/jobs"
+	"github.com/goyii2/framework/examples/basic/views"
 	"github.com/goyii2/framework/i18n"
 	"github.com/goyii2/framework/url"
 	"github.com/goyii2/framework/web"
@@ -27,13 +29,13 @@ type QueueController struct {
 // get) and confirms the enqueue.
 func (qc *QueueController) ActionIndex(c *web.Context) error {
 	ctx := c.Context()
-	status, err := readQueueStatus(ctx)
+	status, err := jobs.ReadQueueStatus(ctx)
 	if err != nil {
 		return err
 	}
 	t := func(msgID string) string { return i18n.T(ctx, "app", msgID, nil) }
 	c.SetTitle(t("Queue"))
-	return c.Render("queue/index", queuePageData{
+	return c.Render("queue/index", views.QueuePageData{
 		Waiting:  strconv.FormatInt(status.Waiting, 10),
 		Reserved: strconv.FormatInt(status.Reserved, 10),
 		Failed:   strconv.FormatInt(status.Failed, 10),
@@ -55,7 +57,7 @@ func (qc *QueueController) ActionPush(c *web.Context) error {
 			recipient = identity.GetName() + "@example.com"
 		}
 	}
-	job := &EmailJob{
+	job := &jobs.EmailJob{
 		To:      recipient,
 		Subject: "A queued notification from the basic demo",
 		Body:    "This message was pushed from the queue page and delivered by a queue worker.",

@@ -1,5 +1,5 @@
 // Tests of the listing search plumbing.
-package main
+package controllers
 
 import "testing"
 

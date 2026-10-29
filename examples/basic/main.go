@@ -1,9 +1,19 @@
-// The basic example is the P0+P1 walkthrough application: configuration
+// The basic example is the P0+P1+P2 walkthrough application: configuration
 // assembly, migrations, seeding, session login, a validated CRUD API with
 // access control, CSRF, negotiated errors, logging and caching — and the
 // browser face on top: templ pages with layout and widgets, RBAC menus,
 // translated interface and validation messages, a paginated sortable list,
-// detail and edit forms, automatic timestamps and the mailer.
+// detail and edit forms, automatic timestamps and the mailer, plus the P2
+// face (queue, page cache, debug panel, Vite frontend).
+//
+// The layout follows the Yii2 mental model, one package per concern:
+//
+//	controllers/  the web controllers (one file per controller)
+//	models/       the Active Record models
+//	views/        the templ pages, layout and view registration
+//	jobs/         the queue jobs
+//	commands/     the user-defined console commands (seed)
+//	migrations/   the versioned schema migrations
 //
 // Run it from this directory:
 //
@@ -25,13 +35,17 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/a-h/templ"
-
 	"github.com/goyii2/framework/base"
 	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/console"
 	"github.com/goyii2/framework/db/ar"
 	"github.com/goyii2/framework/debug"
+	"github.com/goyii2/framework/examples/basic/commands"
+	"github.com/goyii2/framework/examples/basic/controllers"
+	"github.com/goyii2/framework/examples/basic/jobs"
+	"github.com/goyii2/framework/examples/basic/migrations"
+	"github.com/goyii2/framework/examples/basic/models"
+	"github.com/goyii2/framework/examples/basic/views"
 	"github.com/goyii2/framework/i18n"
 	migratecommands "github.com/goyii2/framework/migrate/commands"
 	queuecommands "github.com/goyii2/framework/queue/commands"
@@ -39,8 +53,6 @@ import (
 	"github.com/goyii2/framework/url"
 	"github.com/goyii2/framework/vite"
 	"github.com/goyii2/framework/web"
-
-	"github.com/goyii2/framework/examples/basic/migrations"
 )
 
 // messages holds the translation trees the i18n middleware resolves:
@@ -49,11 +61,6 @@ import (
 //
 //go:embed messages
 var messages embed.FS
-
-// headAssets is the Vite entry of the frontend (script and stylesheet tags),
-// resolved once at startup and rendered into every page's <head> by the
-// application layout.
-var headAssets templ.Component
 
 func main() {
 	// runtime/ holds the sqlite database, the log file, session records,
@@ -76,7 +83,7 @@ func main() {
 	// The queue job registry is filled before any command runs: serve pushes
 	// onto it, seed plants the demo jobs, and the queue workers resolve the
 	// same names.
-	if err := app.Queue().Jobs().Register(&EmailJob{}); err != nil {
+	if err := app.Queue().Jobs().Register(&jobs.EmailJob{}); err != nil {
 		fail(err)
 	}
 
@@ -104,13 +111,13 @@ func main() {
 	}
 	handler.SetAuthManager(auth)
 	registerRoutes(handler, app, auth)
-	registerViews(handler.Views())
+	views.Register(handler.Views())
 	url.SetDefault(handler.URLs()) // url.To resolves this handler's named routes
 
 	con := console.New(app, console.WithHandler(handler))
 	con.AddCommand(migratecommands.New(app, migrations.All()))
 	con.AddCommand(queuecommands.New(app))
-	con.AddCommand(newSeedCommand())
+	con.AddCommand(commands.NewSeedCommand())
 	if err := con.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -129,7 +136,7 @@ func mountFrontend(h *web.Handler) {
 	if err != nil {
 		fail(err)
 	}
-	headAssets = entry
+	views.HeadAssets = entry
 	if front.IsDev() {
 		h.Use(front.DevProxy("/assets"))
 		return
@@ -176,10 +183,10 @@ func registerRoutes(h *web.Handler, app *base.Application, auth *rbac.DbManager)
 	}.Middleware())
 	// The application frame wraps every HTML render (pages and error
 	// pages alike); JSON replies never render, so it stays dormant there.
-	h.Use(pageLayout())
+	h.Use(views.Layout())
 
-	site := &SiteController{}
-	post := &PostController{Auth: auth}
+	site := &controllers.SiteController{}
+	post := &controllers.PostController{Auth: auth}
 
 	sc := h.Ctrl(site)
 	sc.Get("/", site.ActionHome).Name("site/home")
@@ -193,12 +200,12 @@ func registerRoutes(h *web.Handler, app *base.Application, auth *rbac.DbManager)
 	// Each demo page registers through its own controller's registrar, so
 	// the controller middleware applies: the queue pages carry none, the
 	// page-cache page carries its PageCache filter.
-	queueDemo := &QueueController{}
+	queueDemo := &controllers.QueueController{}
 	qc := h.Ctrl(queueDemo)
 	qc.Get("/queue", queueDemo.ActionIndex).Name("queue/index")
 	qc.Post("/queue/push", queueDemo.ActionPush).Name("queue/push")
 
-	cacheDemo := &CacheController{}
+	cacheDemo := &controllers.CacheController{}
 	cc := h.Ctrl(cacheDemo)
 	cc.Get("/pagecache", cacheDemo.ActionDemo).Name("site/pagecache")
 
@@ -251,14 +258,14 @@ func registerRoutes(h *web.Handler, app *base.Application, auth *rbac.DbManager)
 	adminRoutes.Use(web.AccessControl{Auth: auth, Rules: []web.AccessRule{
 		{Allow: true, Roles: []string{"@"}}, // module-wide: login required below /admin
 	}}.Middleware())
-	if err := admin.RegisterController("panel", &PanelController{}); err != nil {
+	if err := admin.RegisterController("panel", &controllers.PanelController{}); err != nil {
 		fail(err)
 	}
 	reportRoutes, err := h.Module("/admin/report")
 	if err != nil {
 		fail(err)
 	}
-	reportRoutes.Get("dashboard", (&ReportController{}).ActionDashboard).Name("dashboard")
+	reportRoutes.Get("dashboard", (&controllers.ReportController{}).ActionDashboard).Name("dashboard")
 }
 
 // findIdentity resolves the identity id stored in a session back to the
@@ -270,7 +277,7 @@ func findIdentity(app *base.Application) func(string) (web.Identity, bool) {
 		if err != nil {
 			return nil, false
 		}
-		user, err := ar.FindByID[User](app.WithContext(context.Background()), uid)
+		user, err := ar.FindByID[models.User](app.WithContext(context.Background()), uid)
 		if err != nil {
 			return nil, false
 		}

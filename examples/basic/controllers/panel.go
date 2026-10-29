@@ -1,6 +1,6 @@
 // PanelController: the /admin module's dashboard, guarded by the module's
 // own access-control middleware rather than any per-controller rule.
-package main
+package controllers
 
 import (
 	"github.com/goyii2/framework/url"

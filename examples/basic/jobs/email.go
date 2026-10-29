@@ -1,7 +1,8 @@
-// The queue demo's jobs and the queue-state helper its page reads. Jobs are
-// registered on the application queue's registry in main before any command
-// runs, so serve, seed and the queue workers all resolve the same names.
-package main
+// The queue demo's job and the storage-level state helpers its page reads.
+// The job is registered on the application queue's registry in main before
+// any command runs, so serve, seed and the queue workers all resolve the
+// same names.
+package jobs
 
 import (
 	"context"
@@ -10,9 +11,13 @@ import (
 	"github.com/goyii2/framework/mail"
 )
 
+// Table is the db driver's queue table, kept in one place so the demo page
+// query, the seed count and the migration registration cannot drift apart.
+const Table = "queue"
+
 // EmailJob is the demo job: it composes a notification message through the
-// application's mailer. With the log driver the complete message lands in the
-// worker's output and the application log — the observable counterpart of an
+// application's mailer. With the log driver the complete message lands in
+// the worker's output and the application log — the observable counterpart of an
 // SMTP delivery. Its exported fields are the JSON payload that travels
 // through the queue table.
 type EmailJob struct {
@@ -36,17 +41,13 @@ func (j *EmailJob) Execute(ctx context.Context) error {
 	return app.Mailer().Send(ctx, msg)
 }
 
-// queueStatus is the state summary the queue page shows: one count per row
+// Status is the state summary the queue page shows: one count per row
 // status plus the waiting total.
-type queueStatus struct {
+type Status struct {
 	Waiting  int64
 	Reserved int64
 	Failed   int64
 }
-
-// queueTable is the db driver's table, kept in one place so the page query
-// and the migration registration cannot drift apart.
-const queueTable = "queue"
 
 // The db driver's documented row statuses: waiting rows are runnable when
 // due, reserved rows are held by a worker, failed rows are parked after their
@@ -57,11 +58,11 @@ const (
 	rowStatusFailed   = 2
 )
 
-// readQueueStatus counts the queue rows per status directly from the table.
+// ReadQueueStatus counts the queue rows per status directly from the table.
 // The demo page owes its numbers to the same storage the driver works on, so
 // what the visitor sees is what a worker would find.
-func readQueueStatus(ctx context.Context) (queueStatus, error) {
-	var s queueStatus
+func ReadQueueStatus(ctx context.Context) (Status, error) {
+	var s Status
 	app := base.FromContext(ctx)
 	conn, err := app.DB()
 	if err != nil {
@@ -71,7 +72,7 @@ func readQueueStatus(ctx context.Context) (queueStatus, error) {
 		Status int   `gorm:"column:status"`
 		Count  int64 `gorm:"column:count"`
 	}{}
-	if err := conn.Raw("SELECT status, COUNT(*) AS count FROM " + queueTable + " GROUP BY status").Scan(&rows).Error; err != nil {
+	if err := conn.Raw("SELECT status, COUNT(*) AS count FROM " + Table + " GROUP BY status").Scan(&rows).Error; err != nil {
 		return s, err
 	}
 	for _, row := range rows {

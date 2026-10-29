@@ -1,7 +1,7 @@
 // SiteController: the entry points around authentication (session
 // login/logout, the CSRF round trip, the identity echo) plus the browser
 // front pages — home, the login form and the mailer demonstration.
-package main
+package controllers
 
 import (
 	"context"
@@ -12,6 +12,8 @@ import (
 	z "github.com/Oudwins/zog"
 
 	"github.com/goyii2/framework/db/ar"
+	"github.com/goyii2/framework/examples/basic/models"
+	"github.com/goyii2/framework/examples/basic/views"
 	"github.com/goyii2/framework/i18n"
 	"github.com/goyii2/framework/mail"
 	"github.com/goyii2/framework/url"
@@ -89,7 +91,7 @@ func (site *SiteController) ActionLogin(c *web.Context) error {
 		fields := translateIssues(c.Context(), z.Issues.Flatten(issues))
 		if html {
 			c.SetTitle(i18n.T(c.Context(), "app", "Login", nil))
-			return c.RenderStatus(http.StatusUnprocessableEntity, "site/login", loginData{
+			return c.RenderStatus(http.StatusUnprocessableEntity, "site/login", views.LoginData{
 				Action:   url.To("site/login", nil),
 				CSRF:     c.CsrfToken(),
 				Username: payload.Username,
@@ -98,11 +100,11 @@ func (site *SiteController) ActionLogin(c *web.Context) error {
 		}
 		return c.JSONStatus(http.StatusUnprocessableEntity, z.Issues.Flatten(issues))
 	}
-	user, err := ar.New[User](c.Context()).Where("username = ?", payload.Username).One()
+	user, err := ar.New[models.User](c.Context()).Where("username = ?", payload.Username).One()
 	if err != nil || !user.CheckPassword(payload.Password) {
 		if html {
 			c.SetTitle(i18n.T(c.Context(), "app", "Login", nil))
-			return c.RenderStatus(http.StatusUnauthorized, "site/login", loginData{
+			return c.RenderStatus(http.StatusUnauthorized, "site/login", views.LoginData{
 				Action:   url.To("site/login", nil),
 				CSRF:     c.CsrfToken(),
 				Username: payload.Username,
@@ -171,7 +173,7 @@ func translateIssues(ctx context.Context, fields map[string][]string) map[string
 // and the mailer demonstration button.
 func (site *SiteController) ActionHome(c *web.Context) error {
 	c.SetTitle(i18n.T(c.Context(), "app", "Home", nil))
-	return c.Render("site/home", homeData{
+	return c.Render("site/home", views.HomeData{
 		SignedIn:  c.User() != nil && c.User().Identity() != nil,
 		PostsURL:  url.To("post/list", nil),
 		LoginURL:  url.To("site/login", nil),
@@ -184,7 +186,7 @@ func (site *SiteController) ActionHome(c *web.Context) error {
 // carrying the CSRF token in the hidden field the middleware verifies.
 func (site *SiteController) ActionLoginForm(c *web.Context) error {
 	c.SetTitle(i18n.T(c.Context(), "app", "Login", nil))
-	return c.Render("site/login", loginData{
+	return c.Render("site/login", views.LoginData{
 		Action: url.To("site/login", nil),
 		CSRF:   c.CsrfToken(),
 	})
@@ -211,5 +213,5 @@ func (site *SiteController) ActionNotify(c *web.Context) error {
 		return err
 	}
 	c.SetTitle(i18n.T(c.Context(), "app", "Mail sent", nil))
-	return c.Render("site/notify", notifyData{Recipient: recipient, HomeURL: url.To("site/home", nil)})
+	return c.Render("site/notify", views.NotifyData{Recipient: recipient, HomeURL: url.To("site/home", nil)})
 }

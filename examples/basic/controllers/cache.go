@@ -1,12 +1,13 @@
 // CacheController: the PageCache filter demonstration — its one page
 // renders a generation timestamp, and the whole response (status,
 // Content-Type, body) is replayed from the cache while the entry lives.
-package main
+package controllers
 
 import (
 	"net/http"
 	"time"
 
+	"github.com/goyii2/framework/examples/basic/views"
 	"github.com/goyii2/framework/i18n"
 	"github.com/goyii2/framework/web"
 )
@@ -59,7 +60,7 @@ func (cc *CacheController) ActionDemo(c *web.Context) error {
 	generated := time.Now().Format(time.RFC3339Nano)
 	ctx := c.Context()
 	c.SetTitle(i18n.T(ctx, "app", "Page cache", nil))
-	return c.Render("site/pagecache", pageCacheData{
+	return c.Render("site/pagecache", views.PageCacheData{
 		GeneratedAt: generated,
 		TTL:         pageCacheTTL.String(),
 	})

@@ -2,7 +2,7 @@
 // i18n.T at render time — the request context carries both the display
 // language and the embedded message source, so one template serves every
 // language.
-package main
+package views
 
 import (
 	"github.com/goyii2/framework/i18n"
@@ -90,7 +90,7 @@ templ appShell(nav navData, title string, content templ.Component) {
 	</html>
 }
 
-templ homePage(d homeData) {
+templ homePage(d HomeData) {
 	<h1>{ i18n.T(ctx, "app", "Welcome to the goyii basic application", nil) }</h1>
 	<p>
 		{ i18n.T(ctx, "app", "This application walks the whole framework stack in a browser: session login, RBAC-differentiated navigation, translated interface and validation messages, a paginated and sortable post list, detail views, validated edit forms, automatic timestamps and the mailer.", nil) }
@@ -108,7 +108,7 @@ templ homePage(d homeData) {
 	</form>
 }
 
-templ loginPage(d loginData) {
+templ loginPage(d LoginData) {
 	<h1>{ i18n.T(ctx, "app", "Login", nil) }</h1>
 	if d.Error != "" {
 		<p class="error">{ d.Error }</p>
@@ -137,13 +137,13 @@ templ loginPage(d loginData) {
 	<p class="meta">admin / admin123 — editor / editor123 — demo / demo123</p>
 }
 
-// linkCell is the grid's inline link cell — one escaped anchor, used for the
+// LinkCell is the grid's inline link cell — one escaped anchor, used for the
 // title (to the detail page) and the Edit action.
-templ linkCell(href string, text string) {
+templ LinkCell(href string, text string) {
 	<a href={ templ.URL(href) }>{ text }</a>
 }
 
-templ postsPage(d postsListData) {
+templ postsPage(d PostsListData) {
 	<h1>{ i18n.T(ctx, "app", "Posts", nil) }</h1>
 	<p class="meta">
 		{ i18n.T(ctx, "app", "Total {n} posts", map[string]any{"n": d.Total}) }
@@ -155,7 +155,7 @@ templ postsPage(d postsListData) {
 	@d.Pager
 }
 
-templ postShowPage(d postShowData) {
+templ postShowPage(d PostShowData) {
 	@d.Breadcrumbs
 	<h1>{ d.Title }</h1>
 	@d.Detail
@@ -173,7 +173,7 @@ templ postShowPage(d postShowData) {
 	</p>
 }
 
-templ postFormPage(d postFormData) {
+templ postFormPage(d PostFormData) {
 	@d.Breadcrumbs
 	<h1>{ d.Heading }</h1>
 	@d.Form
@@ -182,7 +182,7 @@ templ postFormPage(d postFormData) {
 	</p>
 }
 
-templ queuePage(d queuePageData) {
+templ queuePage(d QueuePageData) {
 	<h1>{ i18n.T(ctx, "app", "Queue", nil) }</h1>
 	<p>
 		{ i18n.T(ctx, "app", "The queue table holds the demo's deferred jobs. Push one here, then drain it from a terminal with \"queue run\" (one pass) or \"queue listen\" (resident worker); the delivered mail lands in the worker's output and the application log.", nil) }
@@ -219,7 +219,7 @@ templ queuePage(d queuePageData) {
 	</p>
 }
 
-templ pageCachePage(d pageCacheData) {
+templ pageCachePage(d PageCacheData) {
 	<h1>{ i18n.T(ctx, "app", "Page cache", nil) }</h1>
 	<p>
 		{ i18n.T(ctx, "app", "This page renders through the PageCache filter with a short lifetime. Reload inside the window and the stored copy replays — the timestamp below does not move; once the entry expires the page renders fresh again.", nil) }
@@ -230,7 +230,7 @@ templ pageCachePage(d pageCacheData) {
 	</p>
 }
 
-templ notifyPage(d notifyData) {
+templ notifyPage(d NotifyData) {
 	<h1>{ i18n.T(ctx, "app", "Mail sent", nil) }</h1>
 	<p>{ i18n.T(ctx, "app", "The message was handed to the configured mailer. The log driver records it in the application log; set mail.driver to smtp in config/app.yaml for real delivery.", nil) }</p>
 	<p class="meta">{ d.Recipient }</p>

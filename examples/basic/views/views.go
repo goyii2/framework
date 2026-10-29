@@ -1,7 +1,9 @@
 // View plumbing of the browser pages: the data shapes actions pass to the
 // templ components, the application layout (menu, session area, language
-// switch around the content) and the named-view registrations.
-package main
+// switch around the content) and the named-view registrations. Controllers
+// construct the exported data types; the templates and the chrome helpers
+// stay private to this package.
+package views
 
 import (
 	"context"
@@ -17,10 +19,14 @@ import (
 	"github.com/goyii2/framework/web"
 )
 
+// HeadAssets is the Vite entry of the frontend (script and stylesheet tags),
+// resolved once at startup in main and rendered into every page's <head> by
+// the application layout.
+var HeadAssets templ.Component
+
 // navData is the chrome of every framed page. It is assembled at render
 // time, so the menu reflects the identity and permissions of the request
-// being answered. Head carries the frontend entry tags (script and
-// stylesheet) resolved once at startup.
+// being answered. Head carries the frontend entry tags.
 type navData struct {
 	AppName   string
 	Lang      string // html lang attribute
@@ -40,8 +46,8 @@ type langLink struct {
 	Current bool
 }
 
-// homeData drives the front page.
-type homeData struct {
+// HomeData drives the front page.
+type HomeData struct {
 	SignedIn  bool
 	PostsURL  string
 	LoginURL  string
@@ -49,9 +55,9 @@ type homeData struct {
 	CSRF      string
 }
 
-// loginData drives the login form; Errors carries the inline schema issues
+// LoginData drives the login form; Errors carries the inline schema issues
 // per field, Error the general (wrong credentials) note.
-type loginData struct {
+type LoginData struct {
 	Action   string
 	CSRF     string
 	Username string
@@ -59,10 +65,10 @@ type loginData struct {
 	Error    string
 }
 
-// postsListData drives the listing page: the rendered GridView (sortable
+// PostsListData drives the listing page: the rendered GridView (sortable
 // headers and the filter row), the pager and the summary line; permissions
 // already resolved.
-type postsListData struct {
+type PostsListData struct {
 	Grid      templ.Component
 	Pager     templ.Component
 	Total     int
@@ -70,8 +76,8 @@ type postsListData struct {
 	CreateURL string
 }
 
-// postShowData drives the detail page.
-type postShowData struct {
+// PostShowData drives the detail page.
+type PostShowData struct {
 	Breadcrumbs templ.Component
 	Detail      templ.Component
 	Title       string
@@ -83,26 +89,26 @@ type postShowData struct {
 	CSRF        string
 }
 
-// postFormData drives the shared create/edit form page; Form is the
+// PostFormData drives the shared create/edit form page; Form is the
 // ActiveForm widget's rendered component — labels, controls and, on a 422
 // re-render, the validators messages under the failing fields with the
 // submitted values refilled.
-type postFormData struct {
+type PostFormData struct {
 	Breadcrumbs templ.Component
 	Heading     string
 	Form        templ.Component
 	CancelURL   string
 }
 
-// notifyData drives the mailer result page.
-type notifyData struct {
+// NotifyData drives the mailer result page.
+type NotifyData struct {
 	Recipient string
 	HomeURL   string
 }
 
-// queuePageData drives the queue demo page. The counts are preformatted
+// QueuePageData drives the queue demo page. The counts are preformatted
 // strings — templ text interpolation writes strings only.
-type queuePageData struct {
+type QueuePageData struct {
 	Waiting  string
 	Reserved string
 	Failed   string
@@ -112,9 +118,9 @@ type queuePageData struct {
 	CSRF     string
 }
 
-// pageCacheData drives the page-cache demonstration page. GeneratedAt is
+// PageCacheData drives the page-cache demonstration page. GeneratedAt is
 // stamped per render — a replayed copy serves the frozen value.
-type pageCacheData struct {
+type PageCacheData struct {
 	GeneratedAt string
 	TTL         string
 }
@@ -129,12 +135,12 @@ func fieldErrors(errors map[string][]string, field string) string {
 	return strings.Join(msgs, "; ")
 }
 
-// pageLayout installs the application frame on every request: the frame
-// wraps HTML renders only, so JSON replies never touch it. The frame closes
-// over the request Context, which keeps the navigation current (identity,
+// Layout installs the application frame on every request: the frame wraps
+// HTML renders only, so JSON replies never touch it. The frame closes over
+// the request Context, which keeps the navigation current (identity,
 // permissions, display language) even for error pages rendered after the
 // action failed.
-func pageLayout() web.Middleware {
+func Layout() web.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if c := web.FromContext(r.Context()); c != nil {
@@ -169,7 +175,7 @@ func buildNav(c *web.Context) navData {
 	nav := navData{
 		AppName:   c.App().Config().App.Name,
 		Lang:      lang,
-		Head:      headAssets,
+		Head:      HeadAssets,
 		LoginURL:  url.To("site/login", nil),
 		LogoutURL: url.To("site/logout", nil),
 		CSRF:      c.CsrfToken(),
@@ -207,9 +213,9 @@ func buildNav(c *web.Context) navData {
 	return nav
 }
 
-// breadcrumbs builds the trail of an inner page: Home / Posts / the current
+// Breadcrumbs builds the trail of an inner page: Home / Posts / the current
 // stop, whose missing URL marks it as the active page.
-func breadcrumbs(ctx context.Context, current string) templ.Component {
+func Breadcrumbs(ctx context.Context, current string) templ.Component {
 	return view.Breadcrumbs{Links: []view.Crumb{
 		{Label: i18n.T(ctx, "app", "Home", nil), URL: url.To("site/home", nil)},
 		{Label: i18n.T(ctx, "app", "Posts", nil), URL: url.To("post/list", nil)},
@@ -217,11 +223,11 @@ func breadcrumbs(ctx context.Context, current string) templ.Component {
 	}}.Render()
 }
 
-// registerViews puts every page of the application into the named-view
-// registry behind ctx.Render, plus the "error" override that dresses the
-// unified error handler's HTML replies in the application frame. Known
-// message texts translate; unknown ones render verbatim.
-func registerViews(r *view.Registry) {
+// Register puts every page of the application into the named-view registry
+// behind ctx.Render, plus the "error" override that dresses the unified
+// error handler's HTML replies in the application frame. Known message
+// texts translate; unknown ones render verbatim.
+func Register(r *view.Registry) {
 	r.Register("site/home", view.Typed(homePage))
 	r.Register("site/login", view.Typed(loginPage))
 	r.Register("site/notify", view.Typed(notifyPage))

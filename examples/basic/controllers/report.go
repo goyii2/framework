@@ -1,6 +1,6 @@
 // ReportController: serves the nested /admin/report submodule — the
 // second-level module of the nesting demonstration.
-package main
+package controllers
 
 import (
 	"github.com/goyii2/framework/web"

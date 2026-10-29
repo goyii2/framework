@@ -2,7 +2,7 @@
 // migrated database with demo data. It runs through the same application
 // assembly as serve, so the Active Record layer (and its insert validation)
 // applies here too.
-package main
+package commands
 
 import (
 	"context"
@@ -13,6 +13,8 @@ import (
 
 	"github.com/goyii2/framework/base"
 	"github.com/goyii2/framework/db/ar"
+	"github.com/goyii2/framework/examples/basic/jobs"
+	"github.com/goyii2/framework/examples/basic/models"
 	"github.com/goyii2/framework/rbac"
 )
 
@@ -34,8 +36,8 @@ var demoAccounts = []struct {
 // the LinkPager step across several pages at the default page size.
 const seedPostCount = 24
 
-// newSeedCommand builds the "seed" console command.
-func newSeedCommand() *cobra.Command {
+// NewSeedCommand builds the "seed" console command.
+func NewSeedCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "seed",
 		Short: "Create the demo accounts, RBAC data and sample posts",
@@ -43,7 +45,7 @@ func newSeedCommand() *cobra.Command {
 			ctx := cmd.Context() // carries the application (see console.ExecuteContext)
 
 			for _, acc := range demoAccounts {
-				n, err := ar.New[User](ctx).Where("username = ?", acc.username).Count()
+				n, err := ar.New[models.User](ctx).Where("username = ?", acc.username).Count()
 				if err != nil {
 					return err
 				}
@@ -51,7 +53,7 @@ func newSeedCommand() *cobra.Command {
 					fmt.Fprintf(cmd.OutOrStdout(), "user %s already exists\n", acc.username)
 					continue
 				}
-				user := ar.New[User](ctx).New()
+				user := ar.New[models.User](ctx).New()
 				user.Username, user.Role = acc.username, acc.role
 				if err := user.SetPassword(acc.password); err != nil {
 					return err
@@ -62,25 +64,25 @@ func newSeedCommand() *cobra.Command {
 				fmt.Fprintf(cmd.OutOrStdout(), "created user %s (%s)\n", acc.username, acc.role)
 			}
 
-			if n, err := ar.New[Post](ctx).Count(); err != nil {
+			if n, err := ar.New[models.Post](ctx).Count(); err != nil {
 				return err
 			} else if n > 0 {
 				fmt.Fprintln(cmd.OutOrStdout(), "posts already present, skipping sample posts")
 				return seedRbac(ctx)
 			}
-			admin, err := ar.New[User](ctx).Where("username = ?", "admin").One()
+			admin, err := ar.New[models.User](ctx).Where("username = ?", "admin").One()
 			if err != nil {
 				return err
 			}
-			editor, err := ar.New[User](ctx).Where("username = ?", "editor").One()
+			editor, err := ar.New[models.User](ctx).Where("username = ?", "editor").One()
 			if err != nil {
 				return err
 			}
 
-			post := ar.New[Post](ctx).New()
+			post := ar.New[models.Post](ctx).New()
 			post.Title = "Hello goyii"
 			post.Body = "This post was created by the seed command. Create your own through POST /post or the New post page."
-			post.Status = PostStatusPublished
+			post.Status = models.PostStatusPublished
 			post.AuthorID = admin.ID
 			if err := post.Save(); err != nil {
 				return fmt.Errorf("seed example post: %w", err)
@@ -88,12 +90,12 @@ func newSeedCommand() *cobra.Command {
 			fmt.Fprintf(cmd.OutOrStdout(), "created example post %d\n", post.ID)
 
 			for i := 1; i <= seedPostCount; i++ {
-				sample := ar.New[Post](ctx).New()
+				sample := ar.New[models.Post](ctx).New()
 				sample.Title = fmt.Sprintf("Sample post %02d", i)
 				sample.Body = fmt.Sprintf("Sample body of post %02d, seeded so pagination and sorting have data to work with.", i)
-				sample.Status = PostStatusPublished
+				sample.Status = models.PostStatusPublished
 				if i%4 == 0 {
-					sample.Status = PostStatusDraft
+					sample.Status = models.PostStatusDraft
 				}
 				sample.AuthorID = admin.ID
 				if i%2 == 0 {
@@ -182,7 +184,7 @@ func seedRbac(ctx context.Context) error {
 	}
 
 	assign := func(role, username string) error {
-		user, err := ar.New[User](ctx).Where("username = ?", username).One()
+		user, err := ar.New[models.User](ctx).Where("username = ?", username).One()
 		if err != nil {
 			return err
 		}
@@ -211,14 +213,14 @@ func seedQueue(ctx context.Context) error {
 		return err
 	}
 	var n int64
-	if err := conn.Table(queueTable).Count(&n).Error; err != nil {
+	if err := conn.Table(jobs.Table).Count(&n).Error; err != nil {
 		return err
 	}
 	if n > 0 {
 		fmt.Println("queue: messages already present, skipping demo jobs")
 		return nil
 	}
-	demo := []EmailJob{
+	demo := []jobs.EmailJob{
 		{
 			To:      "admin@example.com",
 			Subject: "Welcome to the goyii basic queue",

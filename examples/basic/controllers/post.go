@@ -4,7 +4,7 @@
 // listing (sortable headers + filter row) and the ActiveForm create/edit
 // forms. The write pages gate on the RBAC permissions the seed grants
 // through the role hierarchy (editor writes, admin also deletes).
-package main
+package controllers
 
 import (
 	"context"
@@ -22,6 +22,8 @@ import (
 	"github.com/goyii2/framework/cache"
 	"github.com/goyii2/framework/dataprovider"
 	"github.com/goyii2/framework/db/ar"
+	"github.com/goyii2/framework/examples/basic/models"
+	"github.com/goyii2/framework/examples/basic/views"
 	"github.com/goyii2/framework/i18n"
 	"github.com/goyii2/framework/url"
 	"github.com/goyii2/framework/validators"
@@ -72,11 +74,11 @@ func (pc *PostController) ActionIndex(c *web.Context) error {
 	dep := cache.NewValueDependency(postMaxID(ctx))
 
 	rebuilt := false
-	var posts []Post
+	var posts []models.Post
 	err := c.App().Cache().GetOrSet(ctx, postListCacheKey, &posts,
 		func(ctx context.Context) (any, error) {
 			rebuilt = true
-			rows, err := ar.New[Post](ctx).OrderBy("id DESC").Limit(50).All()
+			rows, err := ar.New[models.Post](ctx).OrderBy("id DESC").Limit(50).All()
 			if err != nil {
 				return nil, err
 			}
@@ -103,7 +105,7 @@ func (pc *PostController) ActionView(c *web.Context) error {
 	if err != nil {
 		return web.NotFound("post not found")
 	}
-	post, err := ar.New[Post](c.Context()).With("Author").Where("id = ?", id).One()
+	post, err := ar.New[models.Post](c.Context()).With("Author").Where("id = ?", id).One()
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return web.NotFound("post not found")
 	}
@@ -128,11 +130,11 @@ func (pc *PostController) ActionCreate(c *web.Context) error {
 	if err := json.NewDecoder(c.Request().Body).Decode(&payload); err != nil {
 		return web.BadRequest("malformed JSON body")
 	}
-	author, ok := c.User().Identity().(*User)
+	author, ok := c.User().Identity().(*models.User)
 	if !ok || author == nil {
 		return web.Unauthorized("authentication required")
 	}
-	post := ar.New[Post](c.Context()).New()
+	post := ar.New[models.Post](c.Context()).New()
 	post.Title, post.Body, post.Status = payload.Title, payload.Body, payload.Status
 	post.AuthorID = author.ID
 	if err := post.Save(); err != nil {
@@ -154,7 +156,7 @@ func (pc *PostController) ActionUpdate(c *web.Context) error {
 	if err != nil {
 		return web.NotFound("post not found")
 	}
-	post, err := ar.FindByID[Post](c.Context(), id)
+	post, err := ar.FindByID[models.Post](c.Context(), id)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return web.NotFound("post not found")
 	}
@@ -184,7 +186,7 @@ func (pc *PostController) ActionDelete(c *web.Context) error {
 	if err != nil {
 		return web.NotFound("post not found")
 	}
-	post, err := ar.FindByID[Post](c.Context(), id)
+	post, err := ar.FindByID[models.Post](c.Context(), id)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return web.NotFound("post not found")
 	}
@@ -235,7 +237,7 @@ func can(c *web.Context, item string) bool {
 }
 
 // postID formats a row id for URL parameters.
-func postID(post *Post) string { return strconv.FormatInt(post.ID, 10) }
+func postID(post *models.Post) string { return strconv.FormatInt(post.ID, 10) }
 
 // likeEscapeClause is the escape declaration every LIKE of the listing
 // search carries; the pattern builder below escapes with the same character.
@@ -276,7 +278,7 @@ func readPostFilters(r *http.Request) postFilters {
 // escaped (no user wildcard reshapes the match), the status compares
 // exactly. Both ride the base query so the count, the page fetch and every
 // link stay consistent with them.
-func (f postFilters) apply(query *ar.Query[Post]) *ar.Query[Post] {
+func (f postFilters) apply(query *ar.Query[models.Post]) *ar.Query[models.Post] {
 	if f.title != "" {
 		query = query.Where("title LIKE ?"+likeEscapeClause, likePattern(f.title))
 	}
@@ -304,8 +306,8 @@ func (pc *PostController) ActionList(c *web.Context) error {
 	}
 
 	filters := readPostFilters(c.Request())
-	res, err := dataprovider.ActiveDataProvider[Post]{
-		Query:        filters.apply(ar.New[Post](c.Context()).With("Author")),
+	res, err := dataprovider.ActiveDataProvider[models.Post]{
+		Query:        filters.apply(ar.New[models.Post](c.Context()).With("Author")),
 		Params:       params,
 		DefaultOrder: []dataprovider.Sort{{Column: "id", Desc: true}},
 	}.Prepare()
@@ -330,36 +332,36 @@ func (pc *PostController) ActionList(c *web.Context) error {
 		return p
 	}
 	sortParam := c.Request().URL.Query().Get("sort")
-	viewURL := func(post *Post) string {
+	viewURL := func(post *models.Post) string {
 		return url.To("post/show", url.P{"id": postID(post)})
 	}
 
 	columns := []view.DataColumn{
 		{
 			Attr: "id", Label: t("ID"), Sortable: true,
-			Value: func(item any) any { return postID(item.(*Post)) },
+			Value: func(item any) any { return postID(item.(*models.Post)) },
 		},
 		{
 			Attr: "title", Label: t("Title"), Sortable: true,
 			Filter: &view.ColumnFilter{},
 			Value: func(item any) any {
-				post := item.(*Post)
-				return linkCell(viewURL(post), post.Title)
+				post := item.(*models.Post)
+				return views.LinkCell(viewURL(post), post.Title)
 			},
 		},
 		{
 			Attr: "status", Label: t("Status"), Sortable: true,
 			Filter: &view.ColumnFilter{Type: view.FieldSelect, Options: []view.FieldOption{
 				{Value: "", Label: t("All")},
-				{Value: PostStatusDraft, Label: t(PostStatusDraft)},
-				{Value: PostStatusPublished, Label: t(PostStatusPublished)},
+				{Value: models.PostStatusDraft, Label: t(models.PostStatusDraft)},
+				{Value: models.PostStatusPublished, Label: t(models.PostStatusPublished)},
 			}},
-			Value: func(item any) any { return t(item.(*Post).Status) },
+			Value: func(item any) any { return t(item.(*models.Post).Status) },
 		},
 		{
 			Attr: "author", Label: t("Author"),
 			Value: func(item any) any {
-				if post := item.(*Post); post.Author != nil {
+				if post := item.(*models.Post); post.Author != nil {
 					return post.Author.Username
 				}
 				return nil
@@ -367,7 +369,7 @@ func (pc *PostController) ActionList(c *web.Context) error {
 		},
 		{
 			Attr: "created_at", Label: t("Created at"), Sortable: true,
-			Value: func(item any) any { return format.DateTime(item.(*Post).CreatedAt) },
+			Value: func(item any) any { return format.DateTime(item.(*models.Post).CreatedAt) },
 		},
 		{
 			Attr: "actions", Label: t("Actions"),
@@ -375,8 +377,8 @@ func (pc *PostController) ActionList(c *web.Context) error {
 				if !canUpdate {
 					return nil
 				}
-				post := item.(*Post)
-				return linkCell(url.To("post/edit", url.P{"id": postID(post)}), t("Edit"))
+				post := item.(*models.Post)
+				return views.LinkCell(url.To("post/edit", url.P{"id": postID(post)}), t("Edit"))
 			},
 		},
 	}
@@ -409,7 +411,7 @@ func (pc *PostController) ActionList(c *web.Context) error {
 	}.Render()
 
 	c.SetTitle(i18n.T(ctx, "app", "Posts", nil))
-	return c.Render("post/list", postsListData{
+	return c.Render("post/list", views.PostsListData{
 		Grid:      grid,
 		Pager:     pager,
 		Total:     res.TotalCount,
@@ -420,12 +422,12 @@ func (pc *PostController) ActionList(c *web.Context) error {
 
 // findPost loads the post addressed by the id path parameter with its
 // author eager-loaded; a missing row answers the negotiated 404.
-func (pc *PostController) findPost(c *web.Context) (*Post, error) {
+func (pc *PostController) findPost(c *web.Context) (*models.Post, error) {
 	id, err := c.ParamInt64("id")
 	if err != nil {
 		return nil, web.NotFound("post not found")
 	}
-	post, err := ar.New[Post](c.Context()).With("Author").Where("id = ?", id).One()
+	post, err := ar.New[models.Post](c.Context()).With("Author").Where("id = ?", id).One()
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, web.NotFound("post not found")
 	}
@@ -461,8 +463,8 @@ func (pc *PostController) ActionShow(c *web.Context) error {
 	}}.Render()
 
 	c.SetTitle(post.Title)
-	return c.Render("post/show", postShowData{
-		Breadcrumbs: breadcrumbs(ctx, post.Title),
+	return c.Render("post/show", views.PostShowData{
+		Breadcrumbs: views.Breadcrumbs(ctx, post.Title),
 		Detail:      detail,
 		Title:       post.Title,
 		CanUpdate:   can(c, "post/update"),
@@ -480,7 +482,7 @@ func (pc *PostController) ActionNew(c *web.Context) error {
 	if err := requirePermission(c, "post/create"); err != nil {
 		return err
 	}
-	return renderPostForm(c, false, http.StatusOK, postFormInput{status: PostStatusDraft}, nil)
+	return renderPostForm(c, false, http.StatusOK, postFormInput{status: models.PostStatusDraft}, nil)
 }
 
 // ActionStore receives the create form. The CSRF middleware verified the
@@ -491,12 +493,12 @@ func (pc *PostController) ActionStore(c *web.Context) error {
 	if err := requirePermission(c, "post/create"); err != nil {
 		return err
 	}
-	author, ok := c.User().Identity().(*User)
+	author, ok := c.User().Identity().(*models.User)
 	if !ok || author == nil {
 		return web.Unauthorized("authentication required")
 	}
 	input := readPostForm(c)
-	post := ar.New[Post](c.Context()).New()
+	post := ar.New[models.Post](c.Context()).New()
 	post.Title, post.Body, post.Status = input.title, input.body, input.status
 	post.AuthorID = author.ID
 	if err := post.Save(); err != nil {
@@ -591,8 +593,8 @@ func renderPostForm(c *web.Context, editing bool, status int, input postFormInpu
 		Fields: []view.ActiveField{
 			{Name: "title", Label: t("Title"), Type: view.FieldText, Required: true, MaxLength: 200},
 			{Name: "status", Label: t("Status"), Type: view.FieldSelect, Options: []view.FieldOption{
-				{Value: PostStatusDraft, Label: t(PostStatusDraft)},
-				{Value: PostStatusPublished, Label: t(PostStatusPublished)},
+				{Value: models.PostStatusDraft, Label: t(models.PostStatusDraft)},
+				{Value: models.PostStatusPublished, Label: t(models.PostStatusPublished)},
 			}},
 			{Name: "body", Label: t("Body"), Type: view.FieldTextarea},
 		},
@@ -605,8 +607,8 @@ func renderPostForm(c *web.Context, editing bool, status int, input postFormInpu
 		CSRF: c.CsrfToken(),
 	}
 	c.SetTitle(heading)
-	return c.RenderStatus(status, "post/form", postFormData{
-		Breadcrumbs: breadcrumbs(ctx, heading),
+	return c.RenderStatus(status, "post/form", views.PostFormData{
+		Breadcrumbs: views.Breadcrumbs(ctx, heading),
 		Heading:     heading,
 		Form:        form.Render(),
 		CancelURL:   url.To("post/list", nil),
