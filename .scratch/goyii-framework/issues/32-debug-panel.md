@@ -1,6 +1,6 @@
 # 32: debug 面板
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 **What to build:** 开发期请求内省工具（debug 包）：App.Debug=true 时挂采集 middleware，按请求聚合七面板——请求/路由匹配、日志、SQL、时间线、Session/User、配置摘要（脱敏）、邮件；每请求一个 JSON 落 `runtime/debug/`（默认保留 200 个、超量淘汰）。内嵌 `/debug` 路由提供请求历史与详情页，并对 200 的 text/html 响应注入页底 toolbar（注入层在 PageCache 内层，复用 29 的 body 捕获 writer）。默认仅本机 IP 可访问，可配 CIDR 列表。
 
