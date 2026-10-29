@@ -1,0 +1,252 @@
+package debug
+
+// The panel's own pages and the injected toolbar. The pages are deliberately
+// plain: one small stylesheet, tables like the example application's pages.
+
+import (
+	"strconv"
+	"strings"
+)
+
+templ pageStyle() {
+	<style>
+		:root { font-family: system-ui, sans-serif; color: #222; background: #fafafa; }
+		body { margin: 0; }
+		a { color: #1a5fb4; }
+		main { max-width: 72rem; margin: 1.5rem auto; padding: 0 1rem; }
+		h1 { font-size: 1.4rem; }
+		h2 { font-size: 1.05rem; margin: 1.6rem 0 0.5rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.25rem; }
+		table { border-collapse: collapse; width: 100%; background: #fff; }
+		th, td { border: 1px solid #e5e7eb; padding: 0.35rem 0.6rem; text-align: left; vertical-align: top; font-size: 0.9rem; }
+		th { background: #f3f4f6; }
+		td.k { width: 12rem; background: #f9fafb; font-weight: 600; white-space: nowrap; }
+		code, pre { font-family: ui-monospace, monospace; font-size: 0.85rem; }
+		pre { background: #fff; border: 1px solid #e5e7eb; padding: 0.5rem 0.7rem; overflow-x: auto; white-space: pre-wrap; }
+		.meta { color: #6b7280; }
+		.err { color: #b91c1c; font-weight: 600; }
+		.ok { color: #15803d; font-weight: 600; }
+		.warn { color: #b45309; font-weight: 600; }
+		pre.sql { white-space: pre-wrap; }
+	</style>
+}
+
+templ historyPage(appName string, entries []*Entry) {
+	<!DOCTYPE html>
+	<html lang="en">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>{ appName } — debug panel</title>
+			@pageStyle()
+		</head>
+		<body>
+			<main>
+				<h1>Request history</h1>
+				<p class="meta">{ strconv.Itoa(len(entries)) } recorded requests, newest first.</p>
+				<table>
+					<thead>
+						<tr>
+							<th>Time</th>
+							<th>Method</th>
+							<th>Path</th>
+							<th>Route</th>
+							<th>Status</th>
+							<th>Duration</th>
+							<th>SQL</th>
+							<th>Logs</th>
+							<th>Mail</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, e := range entries {
+							<tr>
+								<td>{ e.Time.Local().Format("15:04:05.000") }</td>
+								<td>{ e.Request.Method }</td>
+								<td>{ e.Request.Path }</td>
+								<td class="meta">{ e.Request.Route }</td>
+								<td>@statusCell(e.Request.Status)</td>
+								<td>{ formatDurationMs(e.Request.DurationMs) } ms</td>
+								<td>{ strconv.Itoa(len(e.SQL)) }</td>
+								<td>{ strconv.Itoa(len(e.Logs)) }</td>
+								<td>{ strconv.Itoa(len(e.Mail)) }</td>
+								<td><a href={ "/debug/view?id=" + e.ID }>detail</a></td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			</main>
+		</body>
+	</html>
+}
+
+templ statusCell(status int) {
+	if status >= 500 {
+		<span class="err">{ strconv.Itoa(status) }</span>
+	} else if status >= 400 {
+		<span class="warn">{ strconv.Itoa(status) }</span>
+	} else {
+		<span class="ok">{ strconv.Itoa(status) }</span>
+	}
+}
+
+templ detailPage(e *Entry) {
+	<!DOCTYPE html>
+	<html lang="en">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>Debug — { e.Request.Method } { e.Request.Path }</title>
+			@pageStyle()
+		</head>
+		<body>
+			<main>
+				<h1>{ e.Request.Method } { e.Request.Path }</h1>
+				<p class="meta">{ e.Time.Local().Format("2006-01-02 15:04:05.000") } · { e.ID } · <a href="/debug">back to history</a></p>
+
+				<h2>Request</h2>
+				<table>
+					<tr><td class="k">Status</td><td>@statusCell(e.Request.Status) <span class="meta">(captured)</span></td></tr>
+					<tr><td class="k">Method / Protocol</td><td>{ e.Request.Method } · { e.Request.Proto }</td></tr>
+					<tr><td class="k">Query</td><td>{ e.Request.Query }</td></tr>
+					<tr><td class="k">Route pattern</td><td><code>{ e.Request.Route }</code></td></tr>
+					if len(e.Request.Params) > 0 {
+						<tr><td class="k">Match parameters</td><td><code>{ formatParams(e.Request.Params) }</code></td></tr>
+					}
+					<tr><td class="k">Duration</td><td>{ formatDurationMs(e.Request.DurationMs) } ms</td></tr>
+					<tr><td class="k">Remote / Host</td><td>{ e.Request.RemoteAddr } · { e.Request.Host }</td></tr>
+					if e.Request.Error != "" {
+						<tr><td class="k">Error</td><td class="err">{ e.Request.Error }</td></tr>
+					}
+				</table>
+
+				<h2>SQL ({ strconv.Itoa(len(e.SQL)) })</h2>
+				if len(e.SQL) == 0 {
+					<p class="meta">No queries recorded.</p>
+				} else {
+					<table>
+						<thead><tr><th>#</th><th>Duration</th><th>Rows</th><th>Outcome</th><th>Statement</th></tr></thead>
+						<tbody>
+							for i, q := range e.SQL {
+								<tr>
+									<td>{ strconv.Itoa(i + 1) }</td>
+									<td>{ formatDurationMs(q.DurationMs) } ms</td>
+									<td>{ strconv.FormatInt(q.Rows, 10) }</td>
+									<td>
+										if q.Error != "" {
+											<span class="err">{ q.Message }</span>
+										} else {
+											{ q.Message }
+										}
+									</td>
+									<td>
+										<pre class="sql">{ q.SQL }</pre>
+										if q.Error != "" {
+											<div class="err">{ q.Error }</div>
+										}
+									</td>
+								</tr>
+							}
+						</tbody>
+					</table>
+				}
+
+				<h2>Timeline ({ strconv.Itoa(len(e.Timeline)) })</h2>
+				if len(e.Timeline) == 0 {
+					<p class="meta">No profiling intervals recorded.</p>
+				} else {
+					<table>
+						<thead><tr><th>Token</th><th>Duration</th></tr></thead>
+						<tbody>
+							for _, t := range e.Timeline {
+								<tr><td><code>{ t.Name }</code></td><td>{ formatDurationMs(t.DurationMs) } ms</td></tr>
+							}
+						</tbody>
+					</table>
+				}
+
+				<h2>Logs ({ strconv.Itoa(len(e.Logs)) })</h2>
+				if len(e.Logs) == 0 {
+					<p class="meta">No log records captured for this request.</p>
+				} else {
+					<table>
+						<thead><tr><th>Time</th><th>Level</th><th>Category</th><th>Message</th></tr></thead>
+						<tbody>
+							for _, l := range e.Logs {
+								<tr>
+									<td class="meta">{ l.Time.Local().Format("15:04:05.000") }</td>
+									<td>{ l.Level }</td>
+									<td>{ l.Category }</td>
+									<td>
+										{ l.Message }
+										if len(l.Attrs) > 0 {
+											<div class="meta"><code>{ formatAttrs(l.Attrs) }</code></div>
+										}
+									</td>
+								</tr>
+							}
+						</tbody>
+					</table>
+				}
+
+				<h2>Session / User</h2>
+				if e.Session == nil {
+					<p class="meta">No session middleware in the chain.</p>
+				} else {
+					<table>
+						<tr><td class="k">Session id</td><td><code>{ e.Session.ID }</code></td></tr>
+						if len(e.Session.Values) == 0 {
+							<tr><td class="k">Values</td><td class="meta">(empty)</td></tr>
+						} else {
+							for _, k := range sortedKeys(e.Session.Values) {
+								<tr><td class="k">{ k }</td><td><code>{ formatValue(e.Session.Values[k]) }</code></td></tr>
+							}
+						}
+					</table>
+				}
+				if e.User != nil {
+					<table>
+						if e.User.Guest {
+							<tr><td class="k">User</td><td class="meta">guest</td></tr>
+						} else {
+							<tr><td class="k">User</td><td>{ e.User.Name } <span class="meta">({ e.User.ID })</span></td></tr>
+							<tr><td class="k">Roles</td><td>{ strings.Join(e.User.Roles, ", ") }</td></tr>
+						}
+					</table>
+				}
+
+				<h2>Configuration</h2>
+				<table>
+					for _, row := range configRows(e.Config) {
+						<tr><td class="k">{ row[0] }</td><td><code>{ row[1] }</code></td></tr>
+					}
+				</table>
+
+				<h2>Mail ({ strconv.Itoa(len(e.Mail)) })</h2>
+				if len(e.Mail) == 0 {
+					<p class="meta">No messages recorded.</p>
+				} else {
+					for _, m := range e.Mail {
+						<p class="meta">{ m.Time.Local().Format("15:04:05.000") }</p>
+						<pre>{ m.Message }</pre>
+					}
+				}
+			</main>
+		</body>
+	</html>
+}
+
+templ toolbar(e *Entry) {
+	<div id="goyii-debug-toolbar" style="position: fixed; bottom: 0; left: 0; right: 0; z-index: 2147483647; display: flex; gap: 1rem; align-items: center; padding: 0.35rem 1rem; background: #1f2937; color: #e5e7eb; font: 12px/1.4 system-ui, sans-serif;">
+		<strong style="color:#fff">goyii debug</strong>
+		<span>@statusCell(e.Request.Status)</span>
+		<span>{ e.Request.Method } { e.Request.Path }</span>
+		<span>{ formatDurationMs(e.Request.DurationMs) } ms</span>
+		<span>SQL { strconv.Itoa(len(e.SQL)) }</span>
+		<span>logs { strconv.Itoa(len(e.Logs)) }</span>
+		<span style="margin-left:auto; display:flex; gap:0.8rem">
+			<a href={ "/debug/view?id=" + e.ID } style="color:#93c5fd">detail</a>
+			<a href="/debug" style="color:#93c5fd">history</a>
+		</span>
+	</div>
+}

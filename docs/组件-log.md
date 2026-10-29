@@ -50,7 +50,11 @@ defer prof.End()   // 成对的 begin/end 记录（INFO 级，profile 类别）
 target, err := log.NewFileTarget("app.log", 10<<20, 5)
 logger := log.New(slog.LevelInfo, target)
 tailored := logger.WithTarget(console, log.Filter{MinLevel: slog.LevelWarn, Includes: []string{"db*"}})
+mem := log.NewMemoryTarget(1000)               // 有界内存 Target，Records() 读回
+chatty := logger.WithLevel(slog.LevelDebug)    // 返回降/升级别后的副本，原 logger 不变
 ```
+
+`MemoryTarget` 保留最近 N 条记录（`debug` 面板按请求挂载的就是它；测试断言分发记录也用它）。
 
 ## 相关文档
 

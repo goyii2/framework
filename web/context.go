@@ -86,6 +86,13 @@ func (c *Context) User() *User { return c.user }
 // middleware — record the error and return without calling next.
 func (c *Context) SetError(err error) { c.err = err }
 
+// Err returns the error recorded for this request — set by an action's
+// return or a middleware's rejection — or nil when the request succeeded.
+// The unified error renderer answers it after the chain unwinds; response
+// captures inside the chain (the debug toolbar) consult this to leave the
+// response to the renderer instead of committing their own.
+func (c *Context) Err() error { return c.err }
+
 // App returns the application serving this request.
 func (c *Context) App() *base.Application { return c.app }
 
@@ -100,6 +107,20 @@ func (c *Context) Request() *http.Request { return c.r }
 // Response returns the response writer. The writer records the status code,
 // readable with StatusCode.
 func (c *Context) Response() http.ResponseWriter { return c.w }
+
+// SwapWriter replaces the writer actions and later middleware write through
+// — the Context writer — with one wrapping w, and returns the function
+// restoring the previous writer. It is the seam response-capturing code
+// outside the web package (the debug toolbar) uses: actions write through
+// the Context writer, so wrapping only the writer handed down the chain
+// captures nothing (PageCache performs the same swap in-package). Swap
+// before the response starts and restore it before the unified error
+// renderer runs, exactly like PageCache.render does.
+func (c *Context) SwapWriter(w http.ResponseWriter) func() {
+	prev := c.w
+	c.w = &responseWriter{ResponseWriter: w, status: http.StatusOK}
+	return func() { c.w = prev }
+}
 
 // StatusCode returns the status code written so far; before anything is
 // written it is 200 OK.

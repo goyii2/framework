@@ -54,6 +54,17 @@ func New(level slog.Level, targets ...Target) *Logger {
 	return l
 }
 
+// WithLevel returns a copy of the logger dispatching at the given level; the
+// receiver is unchanged. The level is the global floor every record must
+// pass before target filters apply — the debug panel lowers it to debug so
+// query and profile records reach its per-request target without rebuilding
+// the configured targets.
+func (l *Logger) WithLevel(level slog.Level) *Logger {
+	clone := *l
+	clone.level = level
+	return &clone
+}
+
 // WithTarget returns a copy of the logger with one more target bound to the
 // given filter; the receiver is unchanged.
 func (l *Logger) WithTarget(t Target, f Filter) *Logger {

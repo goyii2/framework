@@ -78,6 +78,21 @@ func (s *Session) GetString(key string) string {
 	return v
 }
 
+// All returns a copy of the session's current values, loading the stored
+// record on first access like Get does; an empty map when nothing is stored
+// or the session was destroyed. It is the read-only snapshot the debug
+// panel renders — mutating the copy affects no live state.
+func (s *Session) All() map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ensureLoaded()
+	out := make(map[string]any, len(s.data))
+	for k, v := range s.data {
+		out[k] = v
+	}
+	return out
+}
+
 // Set stores value under key for subsequent requests. Writing to a
 // destroyed session is a no-op: the session stays dead for the rest of the
 // request. Sessions should be mutated before the action writes its
