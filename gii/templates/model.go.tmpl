@@ -1,0 +1,44 @@
+// Code generated from the "{{.Table}}" table structure; review and edit
+// freely — the generator does not keep this file in sync.
+package {{.Package}}
+
+import (
+{{if .UsesTime}}	"time"
+
+{{end}}	z "github.com/Oudwins/zog"
+
+	"github.com/goyii2/framework/db/ar"
+	"github.com/goyii2/framework/validators"
+)
+
+// {{.Model}} maps the {{.Table}} table.
+type {{.Model}} struct {
+	ar.Model
+{{- range .Fields}}
+	{{.Name}} {{.Type}} `gorm:"{{.GormTag}}" json:"{{.Column}}"`{{if .Comment}} // {{.Comment}}{{end}}
+{{- end}}
+}
+
+// TableName fixes the table the Active Record layer addresses.
+func ({{.Model}}) TableName() string { return "{{.Table}}" }
+
+// Rules is the guessed validation skeleton: NOT NULL columns without a
+// database default became Required, varchar lengths became Max. Where the
+// generator did not dare to guess it left TODO comments — finish them by
+// hand (see the validators package).
+func ({{lowerName .Model}} *{{.Model}}) Rules() validators.RuleSet {
+	shape := z.Shape{
+{{- range .Fields}}
+{{- if .Rule}}
+		{{.Rule}}
+{{- end}}
+{{- range .Notes}}
+		{{.}}
+{{- end}}
+{{- end}}
+	}
+	return validators.RuleSet{
+		validators.ScenarioInsert: z.Struct(shape),
+		validators.ScenarioUpdate: z.Struct(shape),
+	}
+}

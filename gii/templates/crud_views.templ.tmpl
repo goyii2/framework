@@ -1,0 +1,29 @@
+// Views of the generated {{.Model}} CRUD. Run "templ generate" to compile
+// them, then register them with the printed snippet. The list composes the
+// GridView and LinkPager the controller prepared; the form wraps the
+// ActiveForm with a cancel link and — when editing — the delete button.
+package {{.Package}}
+
+templ {{.ModelVar}}ListPage(d {{.ModelVar}}ListData) {
+	<h1>{{.Label}} list</h1>
+	<p class="meta">
+		{ d.Total } total
+		<a class="button" href={ templ.URL(d.NewURL) }>New {{.ModelVar}}</a>
+	</p>
+	@d.Grid
+	@d.Pager
+}
+
+templ {{.ModelVar}}FormPage(d {{.ModelVar}}FormData) {
+	<h1>{ d.Heading }</h1>
+	@d.Form
+	<p class="actions">
+		<a href={ templ.URL(d.CancelURL) }>Cancel</a>
+		if d.DeleteURL != "" {
+			<form method="post" action={ templ.URL(d.DeleteURL) }>
+				<input type="hidden" name="_csrf" value={ d.CSRF }/>
+				<button type="submit">Delete</button>
+			</form>
+		}
+	</p>
+}

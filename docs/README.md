@@ -32,3 +32,4 @@ goyii/framework 使用文档目录（面向使用者：部署、配置、使用�
 | [组件：view 与 templ](组件-view与templ.md) | 视图注册表、Layout 组合、Widget 四件、分页联动 |
 | [组件：debug 面板](组件-debug面板.md) | 开发期请求内省、七面板、toolbar 注入 |
 | [组件：vite 前端构建](组件-vite.md) | manifest 解析、Entry 标签、dev 直连与反向代理（HMR） |
+| [组件：gii 代码生成器](组件-gii代码生成器.md) | model / controller / crud 三命令、模板覆盖、gofmt 产物 |

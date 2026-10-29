@@ -1,0 +1,48 @@
+// Code generated skeleton for the "{{.ID}}" controller; the actions are
+// placeholders to fill in — the generator does not keep this file in sync.
+package {{.Package}}
+
+import (
+	"net/http"
+
+	"github.com/goyii2/framework/web"
+)
+
+// {{.StructName}} groups the {{.ID}} actions ({{.Label}}). Register the
+// printed route snippet and implement the actions.
+type {{.StructName}} struct {
+	web.Controller
+}
+
+// ActionIndex lists the {{.Label}} records.
+func ({{.Receiver}} *{{.StructName}}) ActionIndex(c *web.Context) error {
+	// TODO: load and answer the {{.Label}} list, e.g. through a
+	// dataprovider.ActiveDataProvider.
+	return c.JSON(map[string]any{"action": "index"})
+}
+
+// ActionView returns the record addressed by the id path parameter.
+func ({{.Receiver}} *{{.StructName}}) ActionView(c *web.Context) error {
+	// TODO: load the record and answer it.
+	return c.JSON(map[string]any{"action": "view", "id": c.Param("id")})
+}
+
+// ActionCreate inserts a record from the request body.
+func ({{.Receiver}} *{{.StructName}}) ActionCreate(c *web.Context) error {
+	// TODO: bind the payload, save through the Active Record layer and
+	// answer 201 with a Location header.
+	return c.JSON(map[string]any{"action": "create"})
+}
+
+// ActionUpdate rewrites the record addressed by the id path parameter.
+func ({{.Receiver}} *{{.StructName}}) ActionUpdate(c *web.Context) error {
+	// TODO: load the record, apply the payload, save.
+	return c.JSON(map[string]any{"action": "update", "id": c.Param("id")})
+}
+
+// ActionDelete removes the record addressed by the id path parameter.
+func ({{.Receiver}} *{{.StructName}}) ActionDelete(c *web.Context) error {
+	// TODO: load and delete the record.
+	c.Response().WriteHeader(http.StatusNoContent)
+	return nil
+}
