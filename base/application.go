@@ -10,6 +10,7 @@ import (
 	"github.com/goyii2/framework/db"
 	"github.com/goyii2/framework/i18n"
 	"github.com/goyii2/framework/log"
+	"github.com/goyii2/framework/mail"
 )
 
 // Application is the process-level component container. Components are
@@ -24,6 +25,7 @@ type Application struct {
 	db        *db.Component
 	cacheComp *component[cache.Cache]
 	i18nComp  *component[*i18n.MessageSource]
+	mailComp  *component[mail.Mailer]
 	events    eventRegistry
 	modules   moduleRegistry
 
@@ -52,6 +54,7 @@ func New(cfg config.Config) *Application {
 		db:        db.NewComponent(cfg.DB, dbOpts...),
 		cacheComp: newComponent(func() cache.Cache { return newDefaultCache(cfg.Cache) }),
 		i18nComp:  newComponent(func() *i18n.MessageSource { return newDefaultI18n(cfg) }),
+		mailComp:  newComponent(func() mail.Mailer { return newDefaultMail(cfg, logComp) }),
 	}
 }
 

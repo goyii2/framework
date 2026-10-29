@@ -19,6 +19,7 @@ type Config struct {
 	Log     Log     `yaml:"log"`
 	Session Session `yaml:"session"`
 	I18n    I18n    `yaml:"i18n"`
+	Mail    Mail    `yaml:"mail"`
 }
 
 // App holds identity and runtime-mode values.
@@ -120,6 +121,28 @@ type I18n struct {
 	MessagesDir string `yaml:"messagesDir"`
 }
 
+// Mail holds the outgoing-mail component values. Driver selects the
+// implementation: "log" records every message in the application log without
+// sending (the development default), "smtp" delivers through a real server.
+type Mail struct {
+	Driver string `yaml:"driver"` // log | smtp; default log
+	From   string `yaml:"from"`   // default sender for messages that set none, e.g. "Ada <noreply@example.com>"
+	SMTP   SMTP   `yaml:"smtp"`
+}
+
+// SMTP holds the values of the smtp driver. Encryption selects the transport
+// security: "none" sends plaintext, "starttls" upgrades the connection with
+// STARTTLS after connect (the default), "smtps" connects with implicit TLS.
+// The Yii2 swiftmailer spellings "tls" and "ssl" are accepted as aliases of
+// starttls and smtps.
+type SMTP struct {
+	Host       string `yaml:"host"`
+	Port       int    `yaml:"port"`     // default: 587 (465 with encryption smtps)
+	Username   string `yaml:"username"` // empty disables authentication
+	Password   string `yaml:"password"`
+	Encryption string `yaml:"encryption"` // none | starttls | smtps (aliases tls/ssl); default starttls
+}
+
 // Default returns a configuration with framework defaults and no file or
 // environment values applied.
 func Default() Config {
@@ -173,6 +196,9 @@ func WithDefaults(cfg Config) Config {
 	}
 	if cfg.I18n.MessagesDir == "" {
 		cfg.I18n.MessagesDir = "messages"
+	}
+	if cfg.Mail.Driver == "" {
+		cfg.Mail.Driver = "log"
 	}
 	return cfg
 }

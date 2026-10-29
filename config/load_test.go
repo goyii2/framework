@@ -222,3 +222,66 @@ func TestLogDefaults(t *testing.T) {
 		t.Errorf("WithDefaults must not invent targets, got %+v", cfg.Log.Targets)
 	}
 }
+
+func TestLoadMailSection(t *testing.T) {
+	dir := t.TempDir()
+	appYAML := `
+app:
+  name: maildemo
+mail:
+  driver: smtp
+  from: Robot <noreply@example.com>
+  smtp:
+    host: mail.example.com
+    port: 465
+    username: alerts
+    password: s3cret
+    encryption: smtps
+`
+	if err := os.WriteFile(filepath.Join(dir, "app.yaml"), []byte(appYAML), 0o644); err != nil {
+		t.Fatalf("writing app.yaml: %v", err)
+	}
+
+	cfg, err := LoadEnv(dir, "prod")
+	if err != nil {
+		t.Fatalf("LoadEnv: %v", err)
+	}
+	if cfg.Mail.Driver != "smtp" || cfg.Mail.From != "Robot <noreply@example.com>" {
+		t.Errorf("mail section = %+v", cfg.Mail)
+	}
+	smtp := cfg.Mail.SMTP
+	if smtp.Host != "mail.example.com" || smtp.Port != 465 || smtp.Username != "alerts" ||
+		smtp.Password != "s3cret" || smtp.Encryption != "smtps" {
+		t.Errorf("smtp section = %+v", smtp)
+	}
+}
+
+func TestMailDefaults(t *testing.T) {
+	cfg := WithDefaults(Config{})
+	if cfg.Mail.Driver != "log" {
+		t.Errorf("default mail driver = %q, want log", cfg.Mail.Driver)
+	}
+	if cfg.Mail.From != "" || cfg.Mail.SMTP.Host != "" {
+		t.Errorf("WithDefaults must not invent mail values, got %+v", cfg.Mail)
+	}
+}
+
+func TestMailEnvOverrides(t *testing.T) {
+	t.Setenv("MAIL_DRIVER", "smtp")
+	t.Setenv("MAIL_FROM", "env@example.com")
+	t.Setenv("MAIL_SMTP_HOST", "mail.env.example.com")
+	t.Setenv("MAIL_SMTP_PORT", "2525")
+	t.Setenv("MAIL_SMTP_ENCRYPTION", "none")
+
+	cfg, err := LoadEnv("testdata", "dev")
+	if err != nil {
+		t.Fatalf("LoadEnv: %v", err)
+	}
+	if cfg.Mail.Driver != "smtp" || cfg.Mail.From != "env@example.com" {
+		t.Errorf("MAIL_DRIVER/MAIL_FROM overrides not applied: %+v", cfg.Mail)
+	}
+	if cfg.Mail.SMTP.Host != "mail.env.example.com" || cfg.Mail.SMTP.Port != 2525 ||
+		cfg.Mail.SMTP.Encryption != "none" {
+		t.Errorf("MAIL_SMTP_* overrides not applied: %+v", cfg.Mail.SMTP)
+	}
+}
