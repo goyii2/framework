@@ -1,0 +1,14 @@
+package vite
+
+// entryTags renders the asset tags of one entry: a stylesheet link per
+// collected CSS file, then the module scripts in order — in build mode the
+// hashed entry script, in dev mode @vite/client first and the entry from
+// the dev server second (stylesheets are dev-injected, no links there).
+templ entryTags(styles []string, scripts []string) {
+	for _, href := range styles {
+		<link rel="stylesheet" href={ templ.URL(href) }/>
+	}
+	for _, src := range scripts {
+		<script type="module" src={ templ.URL(src) }></script>
+	}
+}

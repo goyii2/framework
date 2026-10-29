@@ -30,3 +30,5 @@ goyii/framework 使用文档目录（面向使用者：部署、配置、使用�
 | [组件：behaviors](组件-behaviors.md) | Timestamp / Blameable / Sluggable / OptimisticLock |
 | [组件：mail](组件-mail.md) | 消息链式构建、log/SMTP 驱动 |
 | [组件：view 与 templ](组件-view与templ.md) | 视图注册表、Layout 组合、Widget 四件、分页联动 |
+| [组件：debug 面板](组件-debug面板.md) | 开发期请求内省、七面板、toolbar 注入 |
+| [组件：vite 前端构建](组件-vite.md) | manifest 解析、Entry 标签、dev 直连与反向代理（HMR） |
