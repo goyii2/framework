@@ -5,18 +5,21 @@ package migrations
 
 import (
 	"github.com/goyii2/framework/migrate"
+	"github.com/goyii2/framework/queue"
 	"github.com/goyii2/framework/rbac"
 )
 
-// All returns every migration in apply order. The RBAC tables come from the
-// framework's own migration (auth_item, auth_item_child, auth_rule,
-// auth_assignment), so the example's schema stays the one every goyii
-// application gets.
+// All returns every migration in apply order. The RBAC tables and the queue
+// table come from the framework's own migrations (auth_item, auth_item_child,
+// auth_rule, auth_assignment and the queue driver's table), so the example's
+// schema stays the one every goyii application gets. The queue table name is
+// the default the config section also declares (queueTable in jobs.go).
 func All() []migrate.Migration {
 	return []migrate.Migration{
 		m20260101_000001_create_user_table{},
 		m20260101_000002_create_post_table{},
 		rbac.NewMigration(),
 		m20260101_000004_add_post_timestamps{},
+		queue.NewMigration("queue"),
 	}
 }

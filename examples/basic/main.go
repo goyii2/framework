@@ -20,17 +20,24 @@ import (
 	"context"
 	"embed"
 	"fmt"
+	"net/http"
 	"os"
 	"strconv"
+	"strings"
+
+	"github.com/a-h/templ"
 
 	"github.com/goyii2/framework/base"
 	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/console"
 	"github.com/goyii2/framework/db/ar"
+	"github.com/goyii2/framework/debug"
 	"github.com/goyii2/framework/i18n"
 	migratecommands "github.com/goyii2/framework/migrate/commands"
+	queuecommands "github.com/goyii2/framework/queue/commands"
 	"github.com/goyii2/framework/rbac"
 	"github.com/goyii2/framework/url"
+	"github.com/goyii2/framework/vite"
 	"github.com/goyii2/framework/web"
 
 	"github.com/goyii2/framework/examples/basic/migrations"
@@ -43,11 +50,17 @@ import (
 //go:embed messages
 var messages embed.FS
 
+// headAssets is the Vite entry of the frontend (script and stylesheet tags),
+// resolved once at startup and rendered into every page's <head> by the
+// application layout.
+var headAssets templ.Component
+
 func main() {
-	// runtime/ holds the sqlite database, the log file, session records and
-	// cache entries. SQLite refuses to open a file inside a missing
-	// directory, so the directories exist before anything opens them.
-	for _, dir := range []string{"runtime", "runtime/session", "runtime/cache"} {
+	// runtime/ holds the sqlite database, the log file, session records,
+	// cache entries and the debug panel's request records. SQLite refuses to
+	// open a file inside a missing directory, so the directories exist before
+	// anything opens them.
+	for _, dir := range []string{"runtime", "runtime/session", "runtime/cache", "runtime/debug"} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			fail(err)
 		}
@@ -60,8 +73,22 @@ func main() {
 	app := base.New(cfg)
 	base.SetDefault(app) // background code without a request context resolves this instance
 	app.SetI18n(i18n.NewMessageSource(messages))
+	// The queue job registry is filled before any command runs: serve pushes
+	// onto it, seed plants the demo jobs, and the queue workers resolve the
+	// same names.
+	if err := app.Queue().Jobs().Register(&EmailJob{}); err != nil {
+		fail(err)
+	}
 
 	handler := web.NewHandler(app)
+	// Static assets answer before anything else: they are not application
+	// requests, so neither the debug capture nor the negotiator sees them.
+	mountFrontend(handler)
+	// The debug panel's capture must sit outside every response-writing
+	// middleware, so it mounts before the application's own global chain;
+	// with app.debug=false the call is a no-op.
+	debug.New(app).Mount(handler)
+
 	handler.SessionManager().IdentityFinder = findIdentity(app)
 	// The RBAC manager answers user.Can and the access-control rules. It
 	// shares the application's connection and carries no code-defined rules
@@ -82,10 +109,47 @@ func main() {
 
 	con := console.New(app, console.WithHandler(handler))
 	con.AddCommand(migratecommands.New(app, migrations.All()))
+	con.AddCommand(queuecommands.New(app))
 	con.AddCommand(newSeedCommand())
 	if err := con.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
+	}
+}
+
+// mountFrontend wires the Vite frontend. The entry resolves once at startup —
+// a wrong entry name or a broken manifest fails the process instead of
+// shipping broken pages. Build mode (the committed web/dist manifest present)
+// serves the hashed assets from disk; dev mode (no manifest yet, or a fresh
+// checkout before the first build) proxies the static paths to the Vite dev
+// server, so the Go side never needs Node at runtime.
+func mountFrontend(h *web.Handler) {
+	front := &vite.Vite{Manifest: "web/dist/.vite/manifest.json"}
+	entry, err := front.Entry("src/main.ts")
+	if err != nil {
+		fail(err)
+	}
+	headAssets = entry
+	if front.IsDev() {
+		h.Use(front.DevProxy("/assets"))
+		return
+	}
+	h.Use(distAssets("web/dist/assets", "/assets"))
+}
+
+// distAssets serves the committed build outputs below one path prefix. The
+// file server confines lookups to dir; unknown files answer the plain 404
+// page, never the convention fallback.
+func distAssets(dir, prefix string) web.Middleware {
+	files := http.StripPrefix(prefix, http.FileServer(http.Dir(dir)))
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if p := r.URL.Path; p == prefix || strings.HasPrefix(p, prefix+"/") {
+				files.ServeHTTP(w, r)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
 	}
 }
 
@@ -125,6 +189,18 @@ func registerRoutes(h *web.Handler, app *base.Application, auth *rbac.DbManager)
 	sc.Post("/logout", site.ActionLogout).Name("site/logout")
 	sc.Get("/me", site.ActionMe).Name("site/me")
 	sc.Post("/site/notify", site.ActionNotify).Name("site/notify")
+
+	// Each demo page registers through its own controller's registrar, so
+	// the controller middleware applies: the queue pages carry none, the
+	// page-cache page carries its PageCache filter.
+	queueDemo := &QueueController{}
+	qc := h.Ctrl(queueDemo)
+	qc.Get("/queue", queueDemo.ActionIndex).Name("queue/index")
+	qc.Post("/queue/push", queueDemo.ActionPush).Name("queue/push")
+
+	cacheDemo := &CacheController{}
+	cc := h.Ctrl(cacheDemo)
+	cc.Get("/pagecache", cacheDemo.ActionDemo).Name("site/pagecache")
 
 	pc := h.Ctrl(post)
 	// Browser pages.

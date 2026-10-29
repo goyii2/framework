@@ -3,6 +3,10 @@
 // JSON API actions of controllers.go and share the same models and access
 // rules; the write pages additionally gate on the RBAC permissions the seed
 // grants through the role hierarchy (editor writes, admin also deletes).
+// The P2 face rides here too: the listing renders through the GridView
+// widget (sortable headers + filter row), the create/edit forms through
+// ActiveForm, and the queue and page-cache demo pages close the loop with
+// the worker and cache components.
 package main
 
 import (
@@ -11,6 +15,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -133,12 +138,45 @@ func likePattern(raw string) string {
 	return "%" + likeEscaper.Replace(raw) + "%"
 }
 
+// postFilters is the filter state of the listing, read from the query
+// string the GridView filter row submits: a contains-match on the title and
+// an exact match on the status.
+type postFilters struct {
+	title  string
+	status string
+}
+
+// active reports whether any filter narrows the listing.
+func (f postFilters) active() bool { return f.title != "" || f.status != "" }
+
+// readPostFilters collects the filter inputs of one request.
+func readPostFilters(r *http.Request) postFilters {
+	return postFilters{
+		title:  strings.TrimSpace(r.URL.Query().Get("title")),
+		status: r.URL.Query().Get("status"),
+	}
+}
+
+// apply narrows the listing query by the filters: the title pattern is fully
+// escaped (no user wildcard reshapes the match), the status compares
+// exactly. Both ride the base query so the count, the page fetch and every
+// link stay consistent with them.
+func (f postFilters) apply(query *ar.Query[Post]) *ar.Query[Post] {
+	if f.title != "" {
+		query = query.Where("title LIKE ?"+likeEscapeClause, likePattern(f.title))
+	}
+	if f.status != "" {
+		query = query.Where("status = ?", f.status)
+	}
+	return query
+}
+
 // ActionList is the browser listing: an ActiveDataProvider pushes the
-// pagination and the whitelisted sort down to SQL, the LinkPager widget
-// renders the paging bar and every column heading links its sort toggle.
-// The q parameter narrows the row set — a filter the base query carries, so
-// the count, the page fetch and every pager/sort link stay consistent with
-// it.
+// pagination and the whitelisted sort down to SQL, the GridView widget
+// renders the table — sortable column headers and the filter row — and the
+// LinkPager renders the paging bar. Filtering splits the widget's way: the
+// grid renders the inputs and echoes their values, the action assembles the
+// query they describe before Prepare.
 func (pc *PostController) ActionList(c *web.Context) error {
 	params, err := dataprovider.FromRequest(c.Request(), sortablePostFields...)
 	if err != nil {
@@ -150,15 +188,9 @@ func (pc *PostController) ActionList(c *web.Context) error {
 		params.PerPage = listPerPage
 	}
 
-	search := strings.TrimSpace(c.Request().URL.Query().Get("q"))
-	query := ar.New[Post](c.Context()).With("Author")
-	if search != "" {
-		pattern := likePattern(search)
-		query = query.Where("(title LIKE ?"+likeEscapeClause+
-			" OR body LIKE ?"+likeEscapeClause+")", pattern, pattern)
-	}
+	filters := readPostFilters(c.Request())
 	res, err := dataprovider.ActiveDataProvider[Post]{
-		Query:        query,
+		Query:        filters.apply(ar.New[Post](c.Context()).With("Author")),
 		Params:       params,
 		DefaultOrder: []dataprovider.Sort{{Column: "id", Desc: true}},
 	}.Prepare()
@@ -166,9 +198,89 @@ func (pc *PostController) ActionList(c *web.Context) error {
 		return err
 	}
 
-	// The pager keeps the active sort and search across pages; the numbered
-	// buttons address pages, the sort toggles restart from page one.
+	ctx := c.Context()
+	t := func(msgID string) string { return i18n.T(ctx, "app", msgID, nil) }
+	format := i18n.F(ctx)
+	canUpdate := can(c, "post/update")
+
+	// keep returns the query-string parameters that must survive a sort
+	// toggle or a pager click: the active filters.
+	keep := func(p url.P) url.P {
+		if filters.title != "" {
+			p["title"] = filters.title
+		}
+		if filters.status != "" {
+			p["status"] = filters.status
+		}
+		return p
+	}
 	sortParam := c.Request().URL.Query().Get("sort")
+	viewURL := func(post *Post) string {
+		return url.To("post/show", url.P{"id": postID(post)})
+	}
+
+	columns := []view.DataColumn{
+		{
+			Attr: "id", Label: t("ID"), Sortable: true,
+			Value: func(item any) any { return postID(item.(*Post)) },
+		},
+		{
+			Attr: "title", Label: t("Title"), Sortable: true,
+			Filter: &view.ColumnFilter{},
+			Value: func(item any) any {
+				post := item.(*Post)
+				return linkCell(viewURL(post), post.Title)
+			},
+		},
+		{
+			Attr: "status", Label: t("Status"), Sortable: true,
+			Filter: &view.ColumnFilter{Type: view.FieldSelect, Options: []view.FieldOption{
+				{Value: "", Label: t("All")},
+				{Value: PostStatusDraft, Label: t(PostStatusDraft)},
+				{Value: PostStatusPublished, Label: t(PostStatusPublished)},
+			}},
+			Value: func(item any) any { return t(item.(*Post).Status) },
+		},
+		{
+			Attr: "author", Label: t("Author"),
+			Value: func(item any) any {
+				if post := item.(*Post); post.Author != nil {
+					return post.Author.Username
+				}
+				return nil
+			},
+		},
+		{
+			Attr: "created_at", Label: t("Created at"), Sortable: true,
+			Value: func(item any) any { return format.DateTime(item.(*Post).CreatedAt) },
+		},
+		{
+			Attr: "actions", Label: t("Actions"),
+			Value: func(item any) any {
+				if !canUpdate {
+					return nil
+				}
+				post := item.(*Post)
+				return linkCell(url.To("post/edit", url.P{"id": postID(post)}), t("Edit"))
+			},
+		},
+	}
+	emptyText := t("No posts yet.")
+	if filters.active() {
+		emptyText = t("No posts match your filters.")
+	}
+	grid := view.GridView{
+		Columns:      columns,
+		ItemCount:    len(res.Items),
+		Item:         func(i int) any { return res.Items[i] },
+		Sort:         sortParam,
+		SortURL:      func(sortValue string) string { return url.To("post/list", keep(url.P{"sort": sortValue})) },
+		FilterValues: view.QueryValues(c.Request(), "title", "status"),
+		EmptyText:    emptyText,
+	}.Render()
+
+	// The pager keeps the active sort and filters across pages; the numbered
+	// buttons address pages, the sort toggles restart from page one.
 	pager := view.LinkPager{
 		Pagination:     res.Pagination(),
 		MaxButtonCount: 5,
@@ -177,83 +289,18 @@ func (pc *PostController) ActionList(c *web.Context) error {
 			if sortParam != "" {
 				p["sort"] = sortParam
 			}
-			if search != "" {
-				p["q"] = search
-			}
-			return url.To("post/list", p)
+			return url.To("post/list", keep(p))
 		},
 	}.Render()
 
-	ctx := c.Context()
-	format := i18n.F(ctx)
-	canUpdate := can(c, "post/update")
-	rows := make([]postRow, 0, len(res.Items))
-	for _, post := range res.Items {
-		row := postRow{
-			ID:        postID(post),
-			Title:     post.Title,
-			Status:    post.Status,
-			CreatedAt: format.DateTime(post.CreatedAt),
-			ViewURL:   url.To("post/show", url.P{"id": postID(post)}),
-			ShowEdit:  canUpdate,
-		}
-		if canUpdate {
-			row.EditURL = url.To("post/edit", url.P{"id": postID(post)})
-		}
-		if post.Author != nil {
-			row.Author = post.Author.Username
-		}
-		rows = append(rows, row)
-	}
-
 	c.SetTitle(i18n.T(ctx, "app", "Posts", nil))
 	return c.Render("post/list", postsListData{
-		Rows:         rows,
-		Total:        res.TotalCount,
-		Pager:        pager,
-		SortID:       sortToggle("id", params, search),
-		SortTitle:    sortToggle("title", params, search),
-		SortStatus:   sortToggle("status", params, search),
-		SortCreated:  sortToggle("created_at", params, search),
-		CanCreate:    can(c, "post/create"),
-		CreateURL:    url.To("post/new", nil),
-		SearchAction: url.To("post/list", nil),
-		Query:        search,
+		Grid:      grid,
+		Pager:     pager,
+		Total:     res.TotalCount,
+		CanCreate: can(c, "post/create"),
+		CreateURL: url.To("post/new", nil),
 	})
-}
-
-// sortToggle builds one column heading: the link flips the column's
-// direction (ascending first, the leading "-" inverts a column already
-// sorted ascending), the arrow marks the active direction, and an active
-// search rides along so sorting never drops the filter.
-func sortToggle(column string, params dataprovider.Params, search string) sortHeader {
-	h := sortHeader{URL: listSortURL(column, false, search)}
-	for _, s := range params.Sort {
-		if s.Column != column {
-			continue
-		}
-		if s.Desc {
-			h.Arrow = " ↓"
-		} else {
-			h.Arrow = " ↑"
-			h.URL = listSortURL(column, true, search)
-		}
-	}
-	return h
-}
-
-// listSortURL renders the sort-toggle URL of one column, keeping the active
-// search in the query string.
-func listSortURL(column string, desc bool, search string) string {
-	value := column
-	if desc {
-		value = "-" + column
-	}
-	p := url.P{"sort": value}
-	if search != "" {
-		p["q"] = search
-	}
-	return url.To("post/list", p)
 }
 
 // findPost loads the post addressed by the id path parameter with its
@@ -408,39 +455,166 @@ func readPostForm(c *web.Context) postFormInput {
 	}
 }
 
-// renderPostForm renders the shared form template for create and edit;
-// editing picks the heading and targets the row's save route instead of the
-// create route. status is 200 for a fresh form and 422 when a rejected
-// submission re-renders with its messages.
-func renderPostForm(c *web.Context, editing bool, status int, input postFormInput, fields map[string][]string) error {
+// renderPostForm renders the shared form for create and edit; editing picks
+// the heading and targets the row's save route instead of the create route.
+// status is 200 for a fresh form and 422 when a rejected submission
+// re-renders with its messages. The ActiveForm widget does the field
+// rendering: labels, controls, and — on a 422 — the validators messages
+// under the failing fields with the submitted values refilled.
+func renderPostForm(c *web.Context, editing bool, status int, input postFormInput, verrs *validators.Errors) error {
 	ctx := c.Context()
-	heading := i18n.T(ctx, "app", "New post", nil)
+	t := func(msgID string) string { return i18n.T(ctx, "app", msgID, nil) }
+	heading := t("New post")
 	action := url.To("post/store", nil)
 	if editing {
-		heading = i18n.T(ctx, "app", "Edit post", nil)
+		heading = t("Edit post")
 		action = url.To("post/save", url.P{"id": c.Param("id")})
+	}
+	form := view.ActiveForm{
+		ID:     "post-form",
+		Action: action,
+		Fields: []view.ActiveField{
+			{Name: "title", Label: t("Title"), Type: view.FieldText, Required: true, MaxLength: 200},
+			{Name: "status", Label: t("Status"), Type: view.FieldSelect, Options: []view.FieldOption{
+				{Value: PostStatusDraft, Label: t(PostStatusDraft)},
+				{Value: PostStatusPublished, Label: t(PostStatusPublished)},
+			}},
+			{Name: "body", Label: t("Body"), Type: view.FieldTextarea},
+		},
+		Errors: verrs,
+		Values: map[string]string{
+			"title":  input.title,
+			"status": input.status,
+			"body":   input.body,
+		},
+		CSRF: c.CsrfToken(),
 	}
 	c.SetTitle(heading)
 	return c.RenderStatus(status, "post/form", postFormData{
 		Breadcrumbs: breadcrumbs(ctx, heading),
 		Heading:     heading,
-		Action:      action,
+		Form:        form.Render(),
 		CancelURL:   url.To("post/list", nil),
-		CSRF:        c.CsrfToken(),
-		Title:       input.title,
-		Body:        input.body,
-		Status:      input.status,
-		Errors:      fields,
 	})
 }
 
 // replayPostForm re-renders the form after a rejected save: validation
-// failures come back as the 422 field map (already translated by the save
-// pipeline's flatten boundary), anything else is a real error.
+// failures come back as the 422 error set (messages already translated by
+// the save pipeline's flatten boundary), anything else is a real error.
 func replayPostForm(c *web.Context, editing bool, input postFormInput, err error) error {
 	var verrs *validators.Errors
 	if !errors.As(err, &verrs) {
 		return err
 	}
-	return renderPostForm(c, editing, http.StatusUnprocessableEntity, input, verrs.Fields)
+	return renderPostForm(c, editing, http.StatusUnprocessableEntity, input, verrs)
+}
+
+// QueueController serves the queue demo page: the live state of the queue
+// table, a button that pushes a demo email job, and the worker commands that
+// drain it. The push is the producer side of the demo; the consumption runs
+// out-of-band through `goyii queue run` or `queue listen` — the page links
+// to the records those runs leave in the application log.
+type QueueController struct {
+	web.Controller
+}
+
+// ActionIndex renders the queue page. A just-pushed job id arrives through
+// the pushed query parameter (the push action redirects back post/redirect/
+// get) and confirms the enqueue.
+func (qc *QueueController) ActionIndex(c *web.Context) error {
+	ctx := c.Context()
+	status, err := readQueueStatus(ctx)
+	if err != nil {
+		return err
+	}
+	t := func(msgID string) string { return i18n.T(ctx, "app", msgID, nil) }
+	c.SetTitle(t("Queue"))
+	return c.Render("queue/index", queuePageData{
+		Waiting:  strconv.FormatInt(status.Waiting, 10),
+		Reserved: strconv.FormatInt(status.Reserved, 10),
+		Failed:   strconv.FormatInt(status.Failed, 10),
+		PushedID: c.Request().URL.Query().Get("pushed"),
+		PushURL:  url.To("queue/push", nil),
+		CSRF:     c.CsrfToken(),
+	})
+}
+
+// ActionPush enqueues one demo email job. The recipient is optional (the
+// signed-in account's address is the default); the push redirects back to
+// the queue page carrying the message id, so the waiting count ticks up
+// visibly before a worker drains it.
+func (qc *QueueController) ActionPush(c *web.Context) error {
+	recipient := strings.TrimSpace(c.Request().PostFormValue("to"))
+	if recipient == "" {
+		recipient = "guest@example.com"
+		if identity := c.User().Identity(); identity != nil {
+			recipient = identity.GetName() + "@example.com"
+		}
+	}
+	job := &EmailJob{
+		To:      recipient,
+		Subject: "A queued notification from the basic demo",
+		Body:    "This message was pushed from the queue page and delivered by a queue worker.",
+	}
+	id, err := c.App().Queue().Push(c.Context(), job)
+	if err != nil {
+		return err
+	}
+	c.App().Log().Info("demo job pushed", "job", job.Name(), "id", id, "to", recipient)
+	return c.Redirect(http.StatusFound,
+		url.To("queue/index", url.P{"pushed": strconv.FormatInt(id, 10)}))
+}
+
+// CacheController demonstrates the PageCache filter: its one page renders a
+// generation timestamp, and the whole response — status, Content-Type, body
+// — is replayed from the cache while the entry lives.
+type CacheController struct {
+	web.Controller
+}
+
+// pageCacheTTL bounds how long a rendered demo page stays cached. Short on
+// purpose: the second request inside the window replays the very same
+// timestamp, and once the entry expires the page renders fresh again.
+const pageCacheTTL = 3 * time.Second
+
+// Middleware caches the controller's pages with web.PageCache. VaryBy keys
+// the entry by the two request-dependent parts the page frame carries — the
+// display language and the signed-in account — so a copy cached for one
+// visitor never replays to another.
+func (cc *CacheController) Middleware() []web.Middleware {
+	return []web.Middleware{web.PageCache{
+		Duration: pageCacheTTL,
+		VaryBy:   pageCacheVary,
+	}.Middleware()}
+}
+
+// pageCacheVary derives the cache-key segment of one request: language plus
+// user id (guests share one variant). It runs inside the pipeline, so the
+// request Context carries both.
+func pageCacheVary(r *http.Request) string {
+	c := web.FromContext(r.Context())
+	if c == nil {
+		return ""
+	}
+	lang, _ := i18n.LanguageFromContext(c.Context())
+	user := "guest"
+	if c.User() != nil {
+		if id := c.User().Identity(); id != nil {
+			user = id.GetID()
+		}
+	}
+	return lang + "|" + user
+}
+
+// ActionDemo renders the page-cache demonstration page. The rendered-at
+// timestamp is the observable: it freezes while a cached copy is replayed
+// and moves again once the entry expired.
+func (cc *CacheController) ActionDemo(c *web.Context) error {
+	generated := time.Now().Format(time.RFC3339Nano)
+	ctx := c.Context()
+	c.SetTitle(i18n.T(ctx, "app", "Page cache", nil))
+	return c.Render("site/pagecache", pageCacheData{
+		GeneratedAt: generated,
+		TTL:         pageCacheTTL.String(),
+	})
 }

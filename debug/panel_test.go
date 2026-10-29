@@ -126,6 +126,30 @@ func TestToolbarNotInjectedIntoErrorResponses(t *testing.T) {
 	}
 }
 
+// TestErrorResponsesKeepHeadersSetBeforeTheFailure pins the error-path
+// contract of the hold: an action (or a filter inside the capture) that set
+// response headers before failing — a VerbFilter's Allow, a Location set
+// ahead of an abort — must not lose them, because the unified renderer
+// answers through the restored writer while the headers live on the real
+// response's map.
+func TestErrorResponsesKeepHeadersSetBeforeTheFailure(t *testing.T) {
+	h, _, _ := newPanelServer(t, nil)
+	h.Get("/denied", func(c *web.Context) error {
+		c.Response().Header().Set("Allow", "GET, HEAD")
+		return web.MethodNotAllowed("method not allowed")
+	})
+	rec := serve(h, http.MethodGet, "/denied", "127.0.0.1:1000")
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want 405", rec.Code)
+	}
+	if allow := rec.Header().Get("Allow"); allow != "GET, HEAD" {
+		t.Errorf("Allow header lost on the error path: %q", allow)
+	}
+	if strings.Contains(rec.Body.String(), toolbarMark) {
+		t.Error("toolbar injected into an error response")
+	}
+}
+
 func TestToolbarSkipsHeadRequests(t *testing.T) {
 	h, _, _ := newPanelServer(t, nil)
 	h.Get("/page", func(c *web.Context) error {

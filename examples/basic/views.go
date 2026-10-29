@@ -19,10 +19,12 @@ import (
 
 // navData is the chrome of every framed page. It is assembled at render
 // time, so the menu reflects the identity and permissions of the request
-// being answered.
+// being answered. Head carries the frontend entry tags (script and
+// stylesheet) resolved once at startup.
 type navData struct {
 	AppName   string
 	Lang      string // html lang attribute
+	Head      templ.Component
 	Menu      templ.Component
 	User      string // display name; empty for guests
 	CSRF      string
@@ -57,41 +59,15 @@ type loginData struct {
 	Error    string
 }
 
-// postRow is one list row with everything the template renders: display
-// strings and per-row action links, permissions already resolved.
-type postRow struct {
-	ID        string
-	Title     string
-	Status    string
-	Author    string
-	CreatedAt string
-	ViewURL   string
-	EditURL   string
-	ShowEdit  bool
-}
-
-// sortHeader is one sortable column heading: the toggle link and the active
-// direction marker.
-type sortHeader struct {
-	URL   string
-	Arrow string
-}
-
-// postsListData drives the listing page. Query is the active search text —
-// echoed into the search box and switched on for the empty-search hint — and
-// SearchAction the endpoint the GET form submits to.
+// postsListData drives the listing page: the rendered GridView (sortable
+// headers and the filter row), the pager and the summary line; permissions
+// already resolved.
 type postsListData struct {
-	Rows         []postRow
-	Total        int
-	Pager        templ.Component
-	SortID       sortHeader
-	SortTitle    sortHeader
-	SortStatus   sortHeader
-	SortCreated  sortHeader
-	CanCreate    bool
-	CreateURL    string
-	SearchAction string
-	Query        string
+	Grid      templ.Component
+	Pager     templ.Component
+	Total     int
+	CanCreate bool
+	CreateURL string
 }
 
 // postShowData drives the detail page.
@@ -107,25 +83,40 @@ type postShowData struct {
 	CSRF        string
 }
 
-// postFormData drives the shared create/edit form; on 422 re-renders,
-// Errors carries the save pipeline's field -> messages map and the entered
-// values echo back into the inputs.
+// postFormData drives the shared create/edit form page; Form is the
+// ActiveForm widget's rendered component — labels, controls and, on a 422
+// re-render, the validators messages under the failing fields with the
+// submitted values refilled.
 type postFormData struct {
 	Breadcrumbs templ.Component
 	Heading     string
-	Action      string
+	Form        templ.Component
 	CancelURL   string
-	CSRF        string
-	Title       string
-	Body        string
-	Status      string
-	Errors      map[string][]string
 }
 
 // notifyData drives the mailer result page.
 type notifyData struct {
 	Recipient string
 	HomeURL   string
+}
+
+// queuePageData drives the queue demo page. The counts are preformatted
+// strings — templ text interpolation writes strings only.
+type queuePageData struct {
+	Waiting  string
+	Reserved string
+	Failed   string
+	// PushedID echoes the message id of a just-pushed job (empty otherwise).
+	PushedID string
+	PushURL  string
+	CSRF     string
+}
+
+// pageCacheData drives the page-cache demonstration page. GeneratedAt is
+// stamped per render — a replayed copy serves the frozen value.
+type pageCacheData struct {
+	GeneratedAt string
+	TTL         string
 }
 
 // fieldErrors joins one field's validation messages for display below its
@@ -178,6 +169,7 @@ func buildNav(c *web.Context) navData {
 	nav := navData{
 		AppName:   c.App().Config().App.Name,
 		Lang:      lang,
+		Head:      headAssets,
 		LoginURL:  url.To("site/login", nil),
 		LogoutURL: url.To("site/logout", nil),
 		CSRF:      c.CsrfToken(),
@@ -188,6 +180,8 @@ func buildNav(c *web.Context) navData {
 	items := []view.MenuItem{
 		{Label: i18n.T(ctx, "app", "Home", nil), URL: url.To("site/home", nil), Active: active("/")},
 		{Label: i18n.T(ctx, "app", "Posts", nil), URL: url.To("post/list", nil), Active: active("/posts")},
+		{Label: i18n.T(ctx, "app", "Queue", nil), URL: url.To("queue/index", nil), Active: active("/queue")},
+		{Label: i18n.T(ctx, "app", "Page cache", nil), URL: url.To("site/pagecache", nil), Active: active("/pagecache")},
 	}
 	if c.User() != nil && c.User().Can("post/create") {
 		items = append(items, view.MenuItem{
@@ -231,6 +225,8 @@ func registerViews(r *view.Registry) {
 	r.Register("site/home", view.Typed(homePage))
 	r.Register("site/login", view.Typed(loginPage))
 	r.Register("site/notify", view.Typed(notifyPage))
+	r.Register("site/pagecache", view.Typed(pageCachePage))
+	r.Register("queue/index", view.Typed(queuePage))
 	r.Register("post/list", view.Typed(postsPage))
 	r.Register("post/show", view.Typed(postShowPage))
 	r.Register("post/form", view.Typed(postFormPage))

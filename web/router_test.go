@@ -283,6 +283,41 @@ func TestExplicitRouteBeatsConventionFallback(t *testing.T) {
 	}
 }
 
+// TestRootRouteBindsOnlyTheRoot pins the root-binding semantics: a path of
+// exactly "/" answers the root request alone. A plain "/" pattern would be a
+// subtree catch-all in ServeMux and swallow every unmatched GET — including
+// paths the convention fallback (and the module middleware it applies)
+// should own.
+func TestRootRouteBindsOnlyTheRoot(t *testing.T) {
+	h, _ := newConventionApp(t)
+	h.Get("/", func(c *web.Context) error {
+		return c.JSON(map[string]string{"from": "root"})
+	})
+
+	// The root itself serves the binding.
+	if got := source(t, h, "/"); got != "root" {
+		t.Errorf("root route missing: from = %q, want root", got)
+	}
+	// Other paths still resolve by convention instead of landing on the
+	// root action.
+	if got := source(t, h, "/site/hello"); got != "convention" {
+		t.Errorf("convention route starved by root binding: from = %q", got)
+	}
+	if got := source(t, h, "/admin/user/list"); got != "module-convention" {
+		t.Errorf("module convention route starved by root binding: from = %q", got)
+	}
+	// A path nothing resolves is a 404, not the root page.
+	res := do(t, h, "/no/such", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d requesting /no/such, want 404", res.StatusCode)
+	}
+	// The root keeps its verb binding: POST / answers 405 with Allow.
+	res = req(t, h, http.MethodPost, "/")
+	if res.StatusCode != http.StatusMethodNotAllowed || res.Header.Get("Allow") != http.MethodGet {
+		t.Fatalf("POST / = %d Allow %q, want 405 with Allow: GET", res.StatusCode, res.Header.Get("Allow"))
+	}
+}
+
 func TestConventionFallbackDisabled(t *testing.T) {
 	app := base.New(config.Config{Web: config.Web{DisableConventionFallback: true}})
 	if err := app.RegisterController("site", siteController{}); err != nil {

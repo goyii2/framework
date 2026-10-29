@@ -37,10 +37,15 @@ templ appShell(nav navData, title string, content templ.Component) {
 				.error { color: #b91c1c; }
 				form label { display: block; margin: 0.8rem 0; font-weight: 600; }
 				form label span.error { display: block; font-weight: 400; }
-				form.search { display: flex; gap: 0.4rem; margin: 0.8rem 0; }
-				form.search input[type=search] { padding: 0.35rem; font: inherit; box-sizing: border-box; width: 16rem; max-width: 60vw; }
-				input[type=text], input[type=password], select, textarea { display: block; width: 100%; max-width: 30rem; margin-top: 0.25rem; padding: 0.35rem; font: inherit; box-sizing: border-box; }
-				textarea { max-width: 40rem; }
+				th.sortable a { text-decoration: none; color: inherit; }
+				th.sortable.asc a::after { content: " ↑"; }
+				th.sortable.desc a::after { content: " ↓"; }
+				tr.filters input, tr.filters select { padding: 0.3rem; font: inherit; box-sizing: border-box; width: 100%; }
+				div.form-group { margin: 0.8rem 0; }
+				div.form-group label { display: block; margin: 0; }
+				.form-control { display: block; width: 100%; max-width: 30rem; margin-top: 0.25rem; padding: 0.35rem; font: inherit; box-sizing: border-box; }
+				textarea.form-control { max-width: 40rem; }
+				div.help-block { color: #b91c1c; font-weight: 400; }
 				button { padding: 0.35rem 1rem; font: inherit; cursor: pointer; }
 				.button { display: inline-block; padding: 0.35rem 0.9rem; background: #1a5fb4; color: #fff !important; border-radius: 4px; text-decoration: none; }
 				ol.breadcrumbs { padding: 0; list-style: none; color: #6b7280; }
@@ -52,6 +57,9 @@ templ appShell(nav navData, title string, content templ.Component) {
 				ul.pagination li.disabled span { color: #9ca3af; }
 				.actions form { display: inline; }
 			</style>
+			if nav.Head != nil {
+				@nav.Head
+			}
 		</head>
 		<body>
 			<header>
@@ -96,6 +104,7 @@ templ homePage(d homeData) {
 	<form method="post" action={ templ.URL(d.NotifyURL) }>
 		<input type="hidden" name="_csrf" value={ d.CSRF }/>
 		<button type="submit">{ i18n.T(ctx, "app", "Send a test email", nil) }</button>
+		<button type="button" id="vite-demo">Vite bundle not loaded</button>
 	</form>
 }
 
@@ -128,55 +137,22 @@ templ loginPage(d loginData) {
 	<p class="meta">admin / admin123 — editor / editor123 — demo / demo123</p>
 }
 
+// linkCell is the grid's inline link cell — one escaped anchor, used for the
+// title (to the detail page) and the Edit action.
+templ linkCell(href string, text string) {
+	<a href={ templ.URL(href) }>{ text }</a>
+}
+
 templ postsPage(d postsListData) {
 	<h1>{ i18n.T(ctx, "app", "Posts", nil) }</h1>
-	<form class="search" method="get" action={ templ.URL(d.SearchAction) }>
-		<input type="search" name="q" value={ d.Query } placeholder={ i18n.T(ctx, "app", "Search posts", nil) }/>
-		<button type="submit">{ i18n.T(ctx, "app", "Search", nil) }</button>
-	</form>
 	<p class="meta">
 		{ i18n.T(ctx, "app", "Total {n} posts", map[string]any{"n": d.Total}) }
 		if d.CanCreate {
 			<a class="button" href={ templ.URL(d.CreateURL) }>{ i18n.T(ctx, "app", "New post", nil) }</a>
 		}
 	</p>
-	if len(d.Rows) == 0 {
-		if d.Query != "" {
-			<p>{ i18n.T(ctx, "app", "No posts match your search.", nil) }</p>
-		} else {
-			<p>{ i18n.T(ctx, "app", "No posts yet.", nil) }</p>
-		}
-	} else {
-		<table>
-			<thead>
-				<tr>
-					<th><a href={ templ.URL(d.SortID.URL) }>{ i18n.T(ctx, "app", "ID", nil) }{ d.SortID.Arrow }</a></th>
-					<th><a href={ templ.URL(d.SortTitle.URL) }>{ i18n.T(ctx, "app", "Title", nil) }{ d.SortTitle.Arrow }</a></th>
-					<th><a href={ templ.URL(d.SortStatus.URL) }>{ i18n.T(ctx, "app", "Status", nil) }{ d.SortStatus.Arrow }</a></th>
-					<th>{ i18n.T(ctx, "app", "Author", nil) }</th>
-					<th><a href={ templ.URL(d.SortCreated.URL) }>{ i18n.T(ctx, "app", "Created at", nil) }{ d.SortCreated.Arrow }</a></th>
-					<th>{ i18n.T(ctx, "app", "Actions", nil) }</th>
-				</tr>
-			</thead>
-			<tbody>
-				for _, row := range d.Rows {
-					<tr>
-						<td>{ row.ID }</td>
-						<td><a href={ templ.URL(row.ViewURL) }>{ row.Title }</a></td>
-						<td>{ i18n.T(ctx, "app", row.Status, nil) }</td>
-						<td>{ row.Author }</td>
-						<td>{ row.CreatedAt }</td>
-						<td>
-							if row.ShowEdit {
-								<a href={ templ.URL(row.EditURL) }>{ i18n.T(ctx, "app", "Edit", nil) }</a>
-							}
-						</td>
-					</tr>
-				}
-			</tbody>
-		</table>
-		@d.Pager
-	}
+	@d.Grid
+	@d.Pager
 }
 
 templ postShowPage(d postShowData) {
@@ -200,38 +176,58 @@ templ postShowPage(d postShowData) {
 templ postFormPage(d postFormData) {
 	@d.Breadcrumbs
 	<h1>{ d.Heading }</h1>
-	if len(d.Errors) > 0 {
-		<p class="error">{ i18n.T(ctx, "app", "Fix the errors below and try again.", nil) }</p>
+	@d.Form
+	<p style="margin-top: 0.8rem;">
+		<a href={ templ.URL(d.CancelURL) }>{ i18n.T(ctx, "app", "Cancel", nil) }</a>
+	</p>
+}
+
+templ queuePage(d queuePageData) {
+	<h1>{ i18n.T(ctx, "app", "Queue", nil) }</h1>
+	<p>
+		{ i18n.T(ctx, "app", "The queue table holds the demo's deferred jobs. Push one here, then drain it from a terminal with \"queue run\" (one pass) or \"queue listen\" (resident worker); the delivered mail lands in the worker's output and the application log.", nil) }
+	</p>
+	if d.PushedID != "" {
+		<p class="meta">{ i18n.T(ctx, "app", "Job #{id} pushed — it is waiting for a worker.", map[string]any{"id": d.PushedID}) }</p>
 	}
-	<form method="post" action={ templ.URL(d.Action) }>
+	<table>
+		<thead>
+			<tr>
+				<th>{ i18n.T(ctx, "app", "Waiting", nil) }</th>
+				<th>{ i18n.T(ctx, "app", "Reserved", nil) }</th>
+				<th>{ i18n.T(ctx, "app", "Failed", nil) }</th>
+			</tr>
+		</thead>
+		<tbody>
+			<tr>
+				<td>{ d.Waiting }</td>
+				<td>{ d.Reserved }</td>
+				<td>{ d.Failed }</td>
+			</tr>
+		</tbody>
+	</table>
+	<form method="post" action={ templ.URL(d.PushURL) }>
 		<input type="hidden" name="_csrf" value={ d.CSRF }/>
 		<label>
-			{ i18n.T(ctx, "app", "Title", nil) }
-			<input type="text" name="title" value={ d.Title }/>
-			if msg := fieldErrors(d.Errors, "title"); msg != "" {
-				<span class="error">{ msg }</span>
-			}
+			{ i18n.T(ctx, "app", "Recipient (optional)", nil) }
+			<input type="text" name="to" placeholder="guest@example.com"/>
 		</label>
-		<label>
-			{ i18n.T(ctx, "app", "Status", nil) }
-			<select name="status">
-				<option value="draft" selected?={ d.Status == "draft" }>{ i18n.T(ctx, "app", "draft", nil) }</option>
-				<option value="published" selected?={ d.Status == "published" }>{ i18n.T(ctx, "app", "published", nil) }</option>
-			</select>
-			if msg := fieldErrors(d.Errors, "status"); msg != "" {
-				<span class="error">{ msg }</span>
-			}
-		</label>
-		<label>
-			{ i18n.T(ctx, "app", "Body", nil) }
-			<textarea name="body" rows="10">{ d.Body }</textarea>
-			if msg := fieldErrors(d.Errors, "body"); msg != "" {
-				<span class="error">{ msg }</span>
-			}
-		</label>
-		<button type="submit">{ i18n.T(ctx, "app", "Save", nil) }</button>
-		<a href={ templ.URL(d.CancelURL) }>{ i18n.T(ctx, "app", "Cancel", nil) }</a>
+		<button type="submit">{ i18n.T(ctx, "app", "Enqueue a demo email", nil) }</button>
 	</form>
+	<p class="meta">
+		<code>go run ./examples/basic queue run</code>
+	</p>
+}
+
+templ pageCachePage(d pageCacheData) {
+	<h1>{ i18n.T(ctx, "app", "Page cache", nil) }</h1>
+	<p>
+		{ i18n.T(ctx, "app", "This page renders through the PageCache filter with a short lifetime. Reload inside the window and the stored copy replays — the timestamp below does not move; once the entry expires the page renders fresh again.", nil) }
+	</p>
+	<p class="meta">
+		{ i18n.T(ctx, "app", "Rendered at", nil) } <code id="pagecache-stamp">{ d.GeneratedAt }</code>
+		{ i18n.T(ctx, "app", "(entry lifetime {ttl})", map[string]any{"ttl": d.TTL}) }
+	</p>
 }
 
 templ notifyPage(d notifyData) {

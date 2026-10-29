@@ -77,6 +77,7 @@ app.Queue().Push(ctx, &EmailJob{To: "a@b.c", Subject: "hi"},
 - **事件**：`queue.EventBeforePush / AfterPush / BeforeExec / AfterExec / ExecError` 五个走 `app.On` / `app.Trigger`（Data 为 `queue.PushEventData` / `queue.ExecEventData`）。
 - **驱动**：`sync` 即推即执行、失败直接返错（开发/测试默认，零外部依赖）；`db` 建表存消息（`queue.NewMigration(cfg.Queue.TableName)` 并入应用迁移列表），SQLite 即可覆盖零依赖场景；`redis` 跨进程走共享连接。sync 驱动忽略 Attempts/重试——没有存储就没有重试。
 - **退避**：默认 `2^attempt` 秒（attempt 为刚失败的尝试序号）封顶 15 分钟；自定义函数在 push 时解析成延迟表随消息存储，跨进程重试不依赖闭包。
+- **可跑示例**：`examples/basic` 的 `/queue` 页 + `EmailJob`（`jobs.go`）+ seed 演示任务 + `queue run` 消费，见 [快速上手](快速上手.md) 的 P2 一节。
 
 
 ## context 携带

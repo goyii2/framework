@@ -397,26 +397,25 @@ func elapsedMs(d time.Duration) float64 {
 	return float64(d.Nanoseconds()) / 1e6
 }
 
-// holdWriter is the response holder underneath the capture: it collects
-// headers and swallows the body the CaptureWriter forwards, so the capture
-// middleware can rewrite the response (weave the toolbar in) before anything
-// reaches the client. Flush breaks the hold: everything captured so far is
-// dumped and later writes pass through live — streaming responses must not
-// be buffered until the end.
+// holdWriter is the response holder underneath the capture: it swallows the
+// body the CaptureWriter forwards, so the capture middleware can rewrite the
+// response (weave the toolbar in) before anything reaches the client. Flush
+// breaks the hold: everything captured so far is dumped and later writes pass
+// through live — streaming responses must not be buffered until the end.
+//
+// Header passes the wrapped writer's live map through: values accumulate
+// there during the hold (nothing reaches the wire before release anyway), and
+// on the error path — where the unified renderer answers through the restored
+// writer — headers the action already set (Allow, Location) survive instead of
+// vanishing with a private copy.
 type holdWriter struct {
 	real    http.ResponseWriter
-	header  http.Header
 	capture *web.CaptureWriter
 	live    bool
 }
 
-// Header returns the held header map, created on first use.
-func (h *holdWriter) Header() http.Header {
-	if h.header == nil {
-		h.header = make(http.Header)
-	}
-	return h.header
-}
+// Header returns the wrapped writer's live header map.
+func (h *holdWriter) Header() http.Header { return h.real.Header() }
 
 // WriteHeader records nothing itself: the capture writer above it tracks the
 // status, and while holding there is no client write to make. Once live the
@@ -447,17 +446,12 @@ func (h *holdWriter) Flush() {
 // released reports whether the hold broke and the response streams live.
 func (h *holdWriter) released() bool { return h.live }
 
-// release sends the (possibly rewritten) body to the wrapped writer together
-// with the held headers and status. Content-Length is dropped: the body may
-// have been rewritten, and one-shot writes let net/http recompute it.
+// release sends the (possibly rewritten) body to the wrapped writer. The
+// headers are already on the wrapped writer's live map (Header passes
+// through); Content-Length is dropped because the body may have been
+// rewritten, and one-shot writes let net/http recompute it.
 func (h *holdWriter) release(body []byte) {
-	hdr := h.real.Header()
-	for k, vv := range h.header {
-		for _, v := range vv {
-			hdr.Add(k, v)
-		}
-	}
-	hdr.Del("Content-Length")
+	h.real.Header().Del("Content-Length")
 	h.real.WriteHeader(h.capture.StatusCode())
 	_, _ = h.real.Write(body)
 }

@@ -198,5 +198,48 @@ func seedRbac(ctx context.Context) error {
 		return err
 	}
 	fmt.Println("rbac: admin (with editor) and editor roles assigned")
+	return seedQueue(ctx)
+}
+
+// seedQueue plants the queue demo jobs: a short welcome series of email jobs.
+// They stay waiting until a worker drains them — `goyii queue run` (one pass)
+// or `goyii queue listen` (resident). Re-running the seed against a drained
+// queue plants them again only when the table is empty.
+func seedQueue(ctx context.Context) error {
+	conn, err := base.FromContext(ctx).DB()
+	if err != nil {
+		return err
+	}
+	var n int64
+	if err := conn.Table(queueTable).Count(&n).Error; err != nil {
+		return err
+	}
+	if n > 0 {
+		fmt.Println("queue: messages already present, skipping demo jobs")
+		return nil
+	}
+	demo := []EmailJob{
+		{
+			To:      "admin@example.com",
+			Subject: "Welcome to the goyii basic queue",
+			Body:    "This message was planted by the seed command and delivered by a queue worker.",
+		},
+		{
+			To:      "editor@example.com",
+			Subject: "A digest is on its way",
+			Body:    "Queue demo job two: a worker will compose and send this notification.",
+		},
+		{
+			To:      "demo@example.com",
+			Subject: "Nothing to do for you here",
+			Body:    "Queue demo job three: even plain accounts can receive queued mail.",
+		},
+	}
+	for i := range demo {
+		if _, err := base.FromContext(ctx).Queue().Push(ctx, &demo[i]); err != nil {
+			return fmt.Errorf("seed queue job %d: %w", i+1, err)
+		}
+	}
+	fmt.Printf("queued %d demo email job(s)\n", len(demo))
 	return nil
 }

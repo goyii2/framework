@@ -160,7 +160,8 @@ curl -s "$BASE/posts" -H 'Accept: text/html' -o "$W/list.html"
 contains "list default order newest first" "Sample post 24" "$W/list.html"
 contains "LinkPager widget renders" "pagination" "$W/list.html"
 contains "sort toggle links render" "sort=title" "$W/list.html"
-contains "search box renders on list" 'name="q"' "$W/list.html"
+contains "grid filter row renders" 'tr class="filters"' "$W/list.html"
+contains "title filter input renders" 'name="title"' "$W/list.html"
 
 curl -s "$BASE/posts?page=2" -H 'Accept: text/html' -o "$W/list2.html"
 contains "page 2 carries the oldest rows" "Sample post 06" "$W/list2.html"
@@ -242,10 +243,10 @@ curl -s -b "$JE" "$BASE/posts" -H 'Accept: text/html' -o "$W/zhlist.html"
 contains "zh choice sticky in session" "共 26 篇文章" "$W/zhlist.html"
 contains "zh status translated" "已发布" "$W/zhlist.html"
 
-# 搜索文案与空结果提示的中文翻译（zh 会话粘住期间验证）
-curl -s -G "$BASE/posts" -b "$JE" --data-urlencode "q=zzz-nomatch" -H 'Accept: text/html' -o "$W/zhqempty.html"
-contains "zh empty-search hint translated" "没有找到匹配的文章。" "$W/zhqempty.html"
-contains "zh search box translated" ">搜索</button>" "$W/zhqempty.html"
+# 过滤行空结果提示的中文翻译（zh 会话粘住期间验证；列表过滤行为 title/status）
+curl -s -G "$BASE/posts" -b "$JE" --data-urlencode "title=zzz-nomatch" -H 'Accept: text/html' -o "$W/zhqempty.html"
+contains "zh empty-filter hint translated" "没有找到匹配筛选条件的文章。" "$W/zhqempty.html"
+contains "zh grid header translated" ">标题</a>" "$W/zhqempty.html"
 
 TE="$(token "$JE")"
 curl -s -b "$JE" -X POST "$BASE/posts" -H 'Accept: text/html' \
@@ -284,42 +285,39 @@ TA="$(token "$JA")"
 status_is "admin delete succeeds" 302 "$(curl -s -o /dev/null -w '%{http_code}' -b "$JA" -X POST "$BASE/posts/26/delete" -H 'Accept: text/html' -H 'Content-Type: application/x-www-form-urlencoded' --data-urlencode "_csrf=$TA")"
 status_is "deleted post gone" 404 "$(curl -s -o /dev/null -w '%{http_code}' -H 'Accept: text/html' -b "$JA" "$BASE/posts/26")"
 
-# --- 列表搜索：命中 / LIKE 转义 / 空集 / q 与翻页排序共存 ------------------
-# 先造一篇中文文章作为搜索夹具（26 已删，新行 id 27 起，后续断言不依赖 id）。
+# --- 列表过滤：命中 / LIKE 转义 / 空集 / title 与翻页排序共存 ----------------
+# 先造一篇中文文章作为过滤夹具（26 已删，新行 id 27 起，后续断言不依赖 id）。
 # 中文负载一律以 ASCII 百分号编码经 --data 直送：本机 curl 会把命令行参数中
 # 的非 ASCII 文本按系统代码页（GBK）转码，直接写中文会把 GBK 字节当 UTF-8
 # 存进库里。编码对应：
-#   %e4%b8%ad%e6%96%87%e6%90%9c%e7%b4%a2                     = 中文搜索
-#   %e4%b8%ad%e6%96%87%e6%90%9c%e7%b4%a2%e7%a4%ba%e4%be%8b   = 中文搜索示例
-#   %e5%86%92%e7%83%9f                                       = 冒烟
-#   body 整串                                                = 一篇用于搜索冒烟的中文文章
+#   %e4%b8%ad%e6%96%87%e8%bf%87%e6%bb%a4%e7%a4%ba%e4%be%8b   = 中文过滤示例
+#   body 整串                                                = 一篇用于过滤冒烟的中文文章
 TE="$(token "$JE")"
 curl -s -b "$JE" -X POST "$BASE/posts" -H 'Accept: text/html' \
     -H 'Content-Type: application/x-www-form-urlencoded' \
     --data-urlencode "_csrf=$TE" \
-    --data "title=%e4%b8%ad%e6%96%87%e6%90%9c%e7%b4%a2%e7%a4%ba%e4%be%8b&status=published&body=%e4%b8%80%e7%af%87%e7%94%a8%e4%ba%8e%e6%90%9c%e7%b4%a2%e5%86%92%e7%83%9f%e7%9a%84%e4%b8%ad%e6%96%87%e6%96%87%e7%ab%a0" \
+    --data "title=%e4%b8%ad%e6%96%87%e8%bf%87%e6%bb%a4%e7%a4%ba%e4%be%8b&status=published&body=%e4%b8%80%e7%af%87%e7%94%a8%e4%ba%8e%e8%bf%87%e6%bb%a4%e5%86%92%e7%83%9f%e7%9a%84%e4%b8%ad%e6%96%87%e6%96%87%e7%ab%a0" \
     -o /dev/null -w '%{http_code}' >"$W/searchseed.code"
-status_is "search fixture post created" 302 "$(cat "$W/searchseed.code")"
+status_is "filter fixture post created" 302 "$(cat "$W/searchseed.code")"
 
-curl -s -G "$BASE/posts" --data "q=%e4%b8%ad%e6%96%87%e6%90%9c%e7%b4%a2" -H 'Accept: text/html' -o "$W/qzh.html"
-contains "chinese keyword search hits" "中文搜索示例" "$W/qzh.html"
-contains "search narrows the total row" "Total 1 posts" "$W/qzh.html"
-
-# q=冒烟 只出现在夹具正文里：证明 content 列同样参与匹配
-curl -s -G "$BASE/posts" --data "q=%e5%86%92%e7%83%9f" -H 'Accept: text/html' -o "$W/qbody.html"
-contains "body keyword search hits" "中文搜索示例" "$W/qbody.html"
-contains "body search narrows the total row" "Total 1 posts" "$W/qbody.html"
+curl -s -G "$BASE/posts" --data "title=%e4%b8%ad%e6%96%87%e8%bf%87%e6%bb%a4" -H 'Accept: text/html' -o "$W/qzh.html"
+contains "chinese keyword filter hits" "中文过滤示例" "$W/qzh.html"
+contains "filter narrows the total row" "Total 1 posts" "$W/qzh.html"
 
 # 裸 % 与 _ 输入若未转义会匹配全表；转义后按字面匹配 -> 空集
-curl -s -G "$BASE/posts" --data-urlencode "q=%uns_matchable_%" -H 'Accept: text/html' -o "$W/qesc.html"
+curl -s -G "$BASE/posts" --data-urlencode "title=%uns_matchable_%" -H 'Accept: text/html' -o "$W/qesc.html"
 contains "like wildcards stay literal" "Total 0 posts" "$W/qesc.html"
-contains "empty search shows friendly hint" "No posts match your search." "$W/qesc.html"
+contains "empty filter shows friendly hint" "No posts match your filters." "$W/qesc.html"
 
-curl -s -G "$BASE/posts" --data-urlencode "page=2" --data-urlencode "q=Sample" -H 'Accept: text/html' -o "$W/qpage2.html"
-contains "search total counts matches only" "Total 24 posts" "$W/qpage2.html"
-contains "search paging shows page 2 rows" "Sample post 06" "$W/qpage2.html"
-contains "pager keeps q across pages" "page=3&amp;q=Sample" "$W/qpage2.html"
-contains "sort links keep q" "q=Sample&amp;sort=title" "$W/qpage2.html"
+# 状态过滤与计数
+curl -s -G "$BASE/posts" --data-urlencode "status=draft" -H 'Accept: text/html' -o "$W/qdraft.html"
+contains "status filter narrows the total row" "Total 6 posts" "$W/qdraft.html"
+
+curl -s -G "$BASE/posts" --data-urlencode "page=2" --data-urlencode "title=Sample" -H 'Accept: text/html' -o "$W/qpage2.html"
+contains "filter total counts matches only" "Total 24 posts" "$W/qpage2.html"
+contains "filter paging shows page 2 rows" "Sample post 06" "$W/qpage2.html"
+contains "pager keeps the filter across pages" "page=3&amp;title=Sample" "$W/qpage2.html"
+contains "sort links keep the filter" "sort=title&amp;title=Sample" "$W/qpage2.html"
 
 # --- 邮件组件（log 驱动）---------------------------------------------------
 TA="$(token "$JA")"

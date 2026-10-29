@@ -15,7 +15,17 @@ web:
 
 db:
   driver: sqlite
-  dsn: runtime/basic.sqlite # file created by `goyii migrate up`
+  # WAL plus a busy timeout let the serve process and a queue worker (or a
+  # second migrate/seed invocation) share the same sqlite file without
+  # "database is locked" failures.
+  dsn: runtime/basic.sqlite?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)
+
+queue:
+  # The db driver stores messages in the queue table (created by
+  # queue.NewMigration through the migrate command); workers consume them
+  # with "queue run" or the resident "queue listen".
+  driver: db
+  tableName: queue
 
 cache:
   driver: file

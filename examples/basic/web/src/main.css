@@ -1,0 +1,17 @@
+/* Styleship of the demo entry. Importing CSS from the entry makes Vite emit a
+   stylesheet chunk, so the manifest carries "css" for the entry and the Go
+   side renders a <link> tag next to the module script. */
+#vite-demo {
+  margin-left: 0.6rem;
+  background: #646cff;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 0.4rem 1rem;
+  font: inherit;
+  cursor: pointer;
+}
+
+#vite-demo:hover {
+  background: #5157d8;
+}

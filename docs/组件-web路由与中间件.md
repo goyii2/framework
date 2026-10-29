@@ -89,6 +89,24 @@ func (c *PostController) ActionView(ctx *web.Context) error {
 | `web.RateLimiter` | 限流 | 按键限速 |
 | `web.HttpBasic` / `web.HttpBearer` | 无状态认证 | 解出瞬态 Identity（不落会话） |
 
+### 整页缓存 PageCache
+
+```go
+func (c *PageController) Middleware() []web.Middleware {
+    return []web.Middleware{
+        web.PageCache{
+            Duration:   3 * time.Second,                    // 生命周期（ttl）；省略走后端默认
+            Dependency: cache.NewValueDependency(maxID()),   // 可选：数据变了条目作废
+            VaryBy:     func(r *http.Request) string { ... }, // 可选：按请求分变体（用户/语言）
+        }.Middleware(),
+    }
+}
+```
+
+只有 **200 的 GET 文本响应**参与：首次请求渲染动作并捕获响应（status + Content-Type + body）写入 `app.Cache()` 组件；后续 GET 直接回放缓存的整页，动作不再运行。POST 等写动词、非 200、JSON/二进制（无显式 Content-Type）、流式响应一律透传不缓存——回放的页面永远不会答一个变更请求。缓存 key = 路由路径 + 规范化查询串（参数排序，`?a=1&b=2` 与 `?b=2&a=1` 同一条目）+ `VaryBy` 值。
+
+与 [调试面板](组件-debug面板.md) 共存时的层级：采集中间件在外、PageCache 在内——缓存条目保持干净（不烧进 toolbar），每次回放请求拿到当次的新 toolbar。完整可跑示例见 `examples/basic` 的 `/pagecache` 页（`CacheController`）。
+
 ```go
 func (pc *PostController) Middleware() []web.Middleware {
     return []web.Middleware{

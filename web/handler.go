@@ -2,6 +2,7 @@ package web
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/goyii2/framework/base"
 	"github.com/goyii2/framework/url"
@@ -144,6 +145,15 @@ func (h *Handler) SetConventionFallback(enabled bool) { h.conventionFallback = e
 func (h *Handler) Handle(pattern string, action Action) {
 	clean, constraints := expandWildcards(pattern)
 	h.recordVerbs(pattern, constraints)
+	// A path of exactly "/" would register as a subtree catch-all: every GET
+	// that no other pattern matches would land on the root action, silently
+	// starving the convention fallback (and any module routes resolved
+	// through it). ServeMux's "{$}" terminator matches only the root itself,
+	// which is what a root binding means; the reverse-URL table and the verb
+	// bindings keep the original path.
+	if clean == "/" || strings.HasSuffix(clean, " /") {
+		clean += "{$}"
+	}
 	h.mux.HandleFunc(clean, func(w http.ResponseWriter, r *http.Request) {
 		c := FromContext(r.Context())
 		if c == nil {
