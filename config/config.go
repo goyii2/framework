@@ -15,6 +15,7 @@ type Config struct {
 	App     App     `yaml:"app"`
 	Web     Web     `yaml:"web"`
 	DB      DB      `yaml:"db"`
+	Redis   Redis   `yaml:"redis"`
 	Cache   Cache   `yaml:"cache"`
 	Log     Log     `yaml:"log"`
 	Session Session `yaml:"session"`
@@ -99,7 +100,11 @@ type Session struct {
 	Redis   Redis  `yaml:"redis"`
 }
 
-// Redis holds connection values for redis-backed components.
+// Redis holds connection values for redis-backed components. The top-level
+// section feeds the application's shared connection; the cache and session
+// sections of the same shape are optional overrides — empty inherits the
+// top-level values, non-empty replaces them (a different server cannot share
+// one connection).
 type Redis struct {
 	Addr     string `yaml:"addr"`
 	Password string `yaml:"password"`

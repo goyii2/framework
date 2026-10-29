@@ -43,17 +43,19 @@ dep := cache.NewTimeDependency(time.Now().Add(10 * time.Minute))
 ## 后端与配置
 
 ```yaml
+redis: { addr: "127.0.0.1:6379", password: "", db: 0 }  # 顶层共享连接（可选）
+
 cache:
   driver: file          # memory | file | redis
   keyPrefix: myapp      # file/redis 的键命名空间（Flush 只清本前缀）
   ttl: 3600             # 秒；ttl<=0 时的默认寿命
   path: runtime/cache   # file 后端目录
-  redis: { addr: "127.0.0.1:6379", password: "", db: 0 }
+  # redis: {...}        # 可选覆盖：非空则不走共享连接，按本段另开专用连接
 ```
 
 - `memory`：进程内，清扫协程回收过期项，重启即空——单进程开发态。
 - `file`：目录落盘，跨进程共享，重启存活。
-- `redis`：多进程部署；连接复用 `redis` 段。
+- `redis`：多进程部署；默认用顶层 `redis` 段的共享连接（与 session 等其他 redis 组件同一条），`cache.redis` 子段非空则覆盖为专用连接。
 
 ## 相关文档
 

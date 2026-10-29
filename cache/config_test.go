@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/goyii2/framework/config"
 )
@@ -55,6 +56,60 @@ func TestNewFromConfigSelectsDriver(t *testing.T) {
 		var got string
 		if found, err := c.Get(ctx, "k", &got); err != nil || !found || got != "v" {
 			t.Fatalf("Get through the factory-built backend: found=%v value=%q err=%v", found, got, err)
+		}
+	})
+}
+
+// TestNewFromConfigWithRedisUsesGivenClient verifies the shared-connection
+// factory variant: the redis driver adopts the exact client handed in (one
+// connection shared with every other redis-backed component), a nil client
+// keeps the open-your-own behavior of NewFromConfig, and the other drivers
+// ignore the client entirely.
+func TestNewFromConfigWithRedisUsesGivenClient(t *testing.T) {
+	t.Run("redis driver adopts the given client instance", func(t *testing.T) {
+		mr := miniredis.RunT(t)
+		client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+		c := NewFromConfigWithRedis(config.Cache{Driver: "redis", TTL: 60}, client)
+		r, ok := c.(*Redis)
+		if !ok {
+			t.Fatalf("driver redis built %T, want *Redis", c)
+		}
+		if r.client != client {
+			t.Error("backend must hold the exact client instance passed in")
+		}
+		// And that client must actually serve the backend.
+		ctx := context.Background()
+		if err := c.Set(ctx, "k", "v", time.Minute); err != nil {
+			t.Fatalf("Set through the injected client: %v", err)
+		}
+		var got string
+		if found, err := c.Get(ctx, "k", &got); err != nil || !found || got != "v" {
+			t.Fatalf("Get through the injected client: found=%v value=%q err=%v", found, got, err)
+		}
+	})
+
+	t.Run("nil client opens its own from the section values", func(t *testing.T) {
+		mr := miniredis.RunT(t)
+		c := NewFromConfigWithRedis(config.Cache{
+			Driver: "redis",
+			Redis:  config.Redis{Addr: mr.Addr()},
+			TTL:    60,
+		}, nil)
+		ctx := context.Background()
+		if err := c.Set(ctx, "k", "v", time.Minute); err != nil {
+			t.Fatalf("Set through the self-opened client: %v", err)
+		}
+		var got string
+		if found, err := c.Get(ctx, "k", &got); err != nil || !found || got != "v" {
+			t.Fatalf("Get through the self-opened client: found=%v value=%q err=%v", found, got, err)
+		}
+	})
+
+	t.Run("other drivers ignore the client", func(t *testing.T) {
+		mr := miniredis.RunT(t)
+		client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+		if _, ok := NewFromConfigWithRedis(config.Cache{Driver: "memory"}, client).(*Memory); !ok {
+			t.Error("driver memory must build a *Memory regardless of the client")
 		}
 	})
 }

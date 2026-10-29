@@ -230,9 +230,25 @@ type SessionManager struct {
 }
 
 // NewSessionManager builds the manager from the application session
-// configuration: backend "redis" connects the redis client, anything else
-// falls back to the file backend under the configured path.
+// configuration: backend "redis" opens its own redis connection from the
+// section's values, anything else falls back to the file backend under the
+// configured path.
 func NewSessionManager(cfg config.Session) *SessionManager {
+	return newSessionManager(cfg, nil)
+}
+
+// NewSessionManagerWithRedis builds the manager like NewSessionManager but
+// takes the redis connection from client instead of opening one — the HTTP
+// entry point uses this to share the application's connection across every
+// redis-backed component. A nil client opens one from the section's values
+// exactly like NewSessionManager.
+func NewSessionManagerWithRedis(cfg config.Session, client redis.UniversalClient) *SessionManager {
+	return newSessionManager(cfg, client)
+}
+
+// newSessionManager assembles the manager; a nil client means the redis
+// backend opens its own connection from the session section.
+func newSessionManager(cfg config.Session, client redis.UniversalClient) *SessionManager {
 	timeout := time.Duration(cfg.Timeout) * time.Second
 	if timeout <= 0 {
 		timeout = 1440 * time.Second
@@ -244,11 +260,13 @@ func NewSessionManager(cfg config.Session) *SessionManager {
 		SameSite:   http.SameSiteLaxMode,
 	}
 	if cfg.Backend == "redis" {
-		client := redis.NewClient(&redis.Options{
-			Addr:     cfg.Redis.Addr,
-			Password: cfg.Redis.Password,
-			DB:       cfg.Redis.DB,
-		})
+		if client == nil {
+			client = redis.NewClient(&redis.Options{
+				Addr:     cfg.Redis.Addr,
+				Password: cfg.Redis.Password,
+				DB:       cfg.Redis.DB,
+			})
+		}
 		m.Store = NewRedisSessionStore(client, "goyii:session:")
 	} else {
 		dir := cfg.Path

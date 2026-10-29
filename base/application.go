@@ -5,6 +5,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/redis/go-redis/v9"
+
 	"github.com/goyii2/framework/cache"
 	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/db"
@@ -23,6 +25,7 @@ type Application struct {
 	cfg       config.Config
 	log       *component[Log]
 	db        *db.Component
+	redisComp *component[redis.UniversalClient]
 	cacheComp *component[cache.Cache]
 	i18nComp  *component[*i18n.MessageSource]
 	mailComp  *component[mail.Mailer]
@@ -48,11 +51,13 @@ func New(cfg config.Config) *Application {
 			return loggerOf(logComp)
 		}, slow)))
 	}
+	redisComp := newComponent(func() redis.UniversalClient { return newDefaultRedis(cfg.Redis) })
 	return &Application{
 		cfg:       cfg,
 		log:       logComp,
 		db:        db.NewComponent(cfg.DB, dbOpts...),
-		cacheComp: newComponent(func() cache.Cache { return newDefaultCache(cfg.Cache) }),
+		redisComp: redisComp,
+		cacheComp: newComponent(func() cache.Cache { return newDefaultCache(cfg.Cache, redisComp) }),
 		i18nComp:  newComponent(func() *i18n.MessageSource { return newDefaultI18n(cfg) }),
 		mailComp:  newComponent(func() mail.Mailer { return newDefaultMail(cfg, logComp) }),
 	}

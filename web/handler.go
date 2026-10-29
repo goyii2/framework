@@ -84,7 +84,14 @@ func NewHandler(app *base.Application) *Handler {
 		moduleMW:           map[*base.Module][]Middleware{},
 	}
 	h.rebuildPipe()
-	h.session = NewSessionManager(app.Config().Session)
+	if sc := app.Config().Session; sc.Backend == "redis" {
+		// A session section without redis values inherits the top-level
+		// section and shares the application's connection; a non-empty one
+		// resolves to a dedicated connection (see Application.RedisFor).
+		h.session = NewSessionManagerWithRedis(sc, app.RedisFor(sc.Redis))
+	} else {
+		h.session = NewSessionManager(sc)
+	}
 	h.Use(h.session.Middleware())
 	h.Use(Language())
 	if !app.Config().Web.DisableCsrf {

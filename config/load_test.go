@@ -285,3 +285,62 @@ func TestMailEnvOverrides(t *testing.T) {
 		t.Errorf("MAIL_SMTP_* overrides not applied: %+v", cfg.Mail.SMTP)
 	}
 }
+
+func TestLoadRedisSection(t *testing.T) {
+	dir := t.TempDir()
+	appYAML := `
+app:
+  name: redisdemo
+redis:
+  addr: redis.internal:6379
+  password: top-secret
+  db: 2
+cache:
+  driver: redis
+session:
+  backend: redis
+  redis:
+    addr: redis.session:6379
+`
+	if err := os.WriteFile(filepath.Join(dir, "app.yaml"), []byte(appYAML), 0o644); err != nil {
+		t.Fatalf("writing app.yaml: %v", err)
+	}
+
+	cfg, err := LoadEnv(dir, "dev")
+	if err != nil {
+		t.Fatalf("LoadEnv: %v", err)
+	}
+	// The top-level section carries the shared connection's values.
+	if cfg.Redis != (Redis{Addr: "redis.internal:6379", Password: "top-secret", DB: 2}) {
+		t.Errorf("top-level redis section = %+v", cfg.Redis)
+	}
+	// Sections keep their own values verbatim: the cache section stays empty
+	// (it inherits the shared connection at wiring time, not in the config)
+	// and the session section keeps its override.
+	if cfg.Cache.Redis != (Redis{}) {
+		t.Errorf("empty cache redis section must stay empty, got %+v", cfg.Cache.Redis)
+	}
+	if cfg.Session.Redis != (Redis{Addr: "redis.session:6379"}) {
+		t.Errorf("session redis override = %+v", cfg.Session.Redis)
+	}
+}
+
+func TestRedisEnvOverrides(t *testing.T) {
+	t.Setenv("REDIS_ADDR", "redis.env:6380")
+	t.Setenv("REDIS_DB", "5")
+
+	cfg, err := LoadEnv("testdata", "dev")
+	if err != nil {
+		t.Fatalf("LoadEnv: %v", err)
+	}
+	if cfg.Redis.Addr != "redis.env:6380" || cfg.Redis.DB != 5 {
+		t.Errorf("REDIS_* overrides not applied: %+v", cfg.Redis)
+	}
+}
+
+func TestRedisDefaults(t *testing.T) {
+	cfg := WithDefaults(Config{})
+	if cfg.Redis != (Redis{}) {
+		t.Errorf("WithDefaults must not invent redis values, got %+v", cfg.Redis)
+	}
+}

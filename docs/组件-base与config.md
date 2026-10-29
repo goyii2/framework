@@ -17,6 +17,7 @@ base.SetDefault(app)                  // 无请求上下文的代码（console/�
 | 方法 | 组件 | 默认实现 |
 |---|---|---|
 | `app.DB() (*db.Conn, error)` | 数据库连接 | 按 `db.driver/dsn` 建立 |
+| `app.Redis() redis.UniversalClient` | 共享 redis 连接 | 按顶层 `redis` 段；cache/session 的 redis 后端共用（各自 `redis:` 子段非空则另开专用连接，`app.RedisFor(section)`） |
 | `app.Cache() cache.Cache` | 缓存 | memory / file / redis 按 `cache.driver` |
 | `app.Log() base.Log` / `app.Logger() *log.Logger` | 日志 | 按 `log` 段的 Target 列表 |
 | `app.I18n() *i18n.MessageSource` | 翻译源 | 读 `i18n.messagesDir` 目录 |

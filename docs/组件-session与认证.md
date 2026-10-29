@@ -12,8 +12,10 @@ session:
   backend: file         # file | redis
   path: runtime/session # file 后端目录
   timeout: 1440         # 秒（默认 24h）
-  redis: { addr: "127.0.0.1:6379" }
+  # redis: { addr: "..." }  # 可选覆盖：非空则不走顶层共享连接
 ```
+
+`backend: redis` 时默认用顶层 `redis` 段的共享连接（与 cache 等其他 redis 组件同一条）；`session.redis` 子段非空则按本段另开专用连接。
 
 action 内经 `ctx.Session()` 读写（`Get/GetString/Set/Remove/Destroy/RegenerateID`）。会话在请求收尾按需持久化，登录时轮换 id（防会话固定）。
 
