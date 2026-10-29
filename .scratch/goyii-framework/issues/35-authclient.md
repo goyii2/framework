@@ -1,6 +1,6 @@
 # 35: authclient
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 **What to build:** 第三方登录薄封装：基于 golang.org/x/oauth2 的 provider 接口（BuildAuthURL / Exchange / FetchIdentity）+ GitHub、Google 内置实现，与 web Identity 登录流联动（回调 -> FetchIdentity -> 既有 login 路径）。不进 examples 主线（避免外部凭据依赖）；交付为 docs 教程 + mock OAuth server 单测。
 
