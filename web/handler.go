@@ -43,6 +43,10 @@ type Handler struct {
 	// traffic.
 	session *SessionManager
 
+	// auth is the authorization backend (AccessChecker) the request pipeline
+	// consults; installed through SetAuthManager before serving traffic.
+	auth AccessChecker
+
 	// chain holds the application-wide middleware, first registered
 	// outermost (first to see each request); pipe is the mux wrapped by it.
 	// The chain starts with the CSRF middleware unless configuration
@@ -85,6 +89,18 @@ func NewHandler(app *base.Application) *Handler {
 // Configure it (backend, cookie attributes, IdentityFinder) before serving
 // traffic; mutations during serving are not synchronized.
 func (h *Handler) SessionManager() *SessionManager { return h.session }
+
+// SetAuthManager installs the authorization backend the request pipeline
+// consults: with it, User.Can and AccessControl rules check roles and
+// permissions against the backend (the framework's rbac.DbManager plugs in
+// directly) instead of the identity's own role list. Without it the
+// role-callback behavior stays in place. Configure before serving traffic;
+// mutations during serving are not synchronized.
+func (h *Handler) SetAuthManager(a AccessChecker) { h.auth = a }
+
+// AuthManager returns the installed authorization backend, nil when none
+// was set.
+func (h *Handler) AuthManager() AccessChecker { return h.auth }
 
 // URLs returns this handler's named-route table. Install it as the
 // package-level default (url.SetDefault) to let url.To resolve this
@@ -150,6 +166,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r = r.WithContext(h.app.WithContext(r.Context()))
 	c := newContext(h.app, w, r)
 	c.views = h.views
+	c.auth = h.auth
 
 	// Registered first so it runs last: afterRequest fires after panic
 	// recovery has rendered its error response.

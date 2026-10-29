@@ -273,7 +273,7 @@ func (m *SessionManager) Middleware() Middleware {
 			}
 			s := newSession(m, w, r)
 			c.session = s
-			c.user = newUser(m, s)
+			c.user = newUser(m, s, c.auth)
 			defer m.finish(c, s)
 			next.ServeHTTP(w, r)
 		})

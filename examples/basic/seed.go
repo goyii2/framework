@@ -5,11 +5,15 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
 
+	"github.com/goyii2/framework/base"
 	"github.com/goyii2/framework/db/ar"
+	"github.com/goyii2/framework/rbac"
 )
 
 // demoAccounts are the seed users: admin may delete posts (access rule),
@@ -55,7 +59,7 @@ func newSeedCommand() *cobra.Command {
 				return err
 			} else if n > 0 {
 				fmt.Fprintln(cmd.OutOrStdout(), "posts already present, skipping example post")
-				return nil
+				return seedRbac(ctx)
 			}
 			admin, err := ar.New[User](ctx).Where("username = ?", "admin").One()
 			if err != nil {
@@ -70,7 +74,67 @@ func newSeedCommand() *cobra.Command {
 				return fmt.Errorf("seed example post: %w", err)
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "created example post %d\n", post.ID)
-			return nil
+			return seedRbac(ctx)
 		},
 	}
+}
+
+// seedRbac fills the authorization tables: an admin role containing the
+// post/delete permission, and the admin account carrying that role. The
+// delete rule of PostController asks for the permission and receives it
+// through the hierarchy — the demo of indirect grants. Re-running against an
+// already-seeded database changes nothing.
+func seedRbac(ctx context.Context) error {
+	app := base.FromContext(ctx)
+	conn, err := app.DB()
+	if err != nil {
+		return err
+	}
+	auth, err := rbac.NewDbManager(conn.DB)
+	if err != nil {
+		return err
+	}
+
+	ensureItem := func(item rbac.Item) error {
+		err := auth.AddItem(item)
+		switch {
+		case err == nil, errors.Is(err, rbac.ErrItemExists):
+			return nil
+		default:
+			return fmt.Errorf("seed item %s: %w", item.Name, err)
+		}
+	}
+	if err := ensureItem(rbac.Item{Name: "admin", Type: rbac.TypeRole, Description: "may do everything"}); err != nil {
+		return err
+	}
+	if err := ensureItem(rbac.Item{Name: "post/delete", Type: rbac.TypePermission, Description: "may delete any post"}); err != nil {
+		return err
+	}
+	if err := auth.AddChild("admin", "post/delete"); err != nil {
+		// The edge may exist from a previous run; only a hierarchy without
+		// it is a real failure.
+		kids, listErr := auth.Children("admin")
+		if listErr != nil {
+			return listErr
+		}
+		present := false
+		for _, kid := range kids {
+			if kid.Name == "post/delete" {
+				present = true
+			}
+		}
+		if !present {
+			return fmt.Errorf("seed admin -> post/delete: %w", err)
+		}
+	}
+
+	admin, err := ar.New[User](ctx).Where("username = ?", "admin").One()
+	if err != nil {
+		return err
+	}
+	if err := auth.Assign("admin", admin.GetID()); err != nil && !errors.Is(err, rbac.ErrAlreadyAssigned) {
+		return fmt.Errorf("seed admin assignment: %w", err)
+	}
+	fmt.Println("rbac: role admin with post/delete assigned to admin")
+	return nil
 }

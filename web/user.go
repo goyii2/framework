@@ -21,19 +21,25 @@ const sessionKeyIdentityID = "__id"
 // session: Login binds an identity to the session (rotating the session id),
 // Logout invalidates it, and Identity resolves the current identity — from
 // the session through the manager's IdentityFinder, or the transient one an
-// authentication middleware established. Reach it through Context.User.
+// authentication middleware established. Can asks the authorization backend
+// (the AccessChecker wired on the handler) what the identity holds.
+// Reach it through Context.User.
 type User struct {
 	mgr     *SessionManager
 	session *Session
+	// checker is the authorization backend Can consults; installed from the
+	// request Context when the User is created.
+	checker AccessChecker
 
 	mu       sync.Mutex
 	identity Identity
 	resolved bool
 }
 
-// newUser builds the request User bound to its session.
-func newUser(mgr *SessionManager, session *Session) *User {
-	return &User{mgr: mgr, session: session}
+// newUser builds the request User bound to its session and authorization
+// backend.
+func newUser(mgr *SessionManager, session *Session, checker AccessChecker) *User {
+	return &User{mgr: mgr, session: session, checker: checker}
 }
 
 // Identity returns the authenticated identity for this request; nil means
@@ -114,10 +120,11 @@ func (u *User) setTransient(identity Identity) {
 // ensureUser returns the request's User, creating a session-less one when
 // the session middleware did not run (an application with stateless
 // authenticators only): transient identities keep working, Login reports
-// its missing-session error instead of silently dropping the login.
+// its missing-session error instead of silently dropping the login, and Can
+// keeps the request's authorization backend either way.
 func (c *Context) ensureUser() *User {
 	if c.user == nil {
-		c.user = &User{}
+		c.user = &User{checker: c.auth}
 	}
 	return c.user
 }

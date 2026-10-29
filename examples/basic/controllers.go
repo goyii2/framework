@@ -123,18 +123,23 @@ func (site *SiteController) ActionMe(c *web.Context) error {
 
 // PostController serves the business CRUD. Its access rules are the
 // AccessControl demonstration: reading is public (guest "?" and logged-in
-// "@" alike), writing needs a login, deleting is the admin role alone, and
-// anything no rule covers is denied.
+// "@" alike), writing needs a login, deleting asks the RBAC manager for the
+// post/delete permission (granted through the admin role's hierarchy, not
+// through the identity's own role column), and anything no rule covers is
+// denied.
 type PostController struct {
 	web.Controller
+
+	// Auth is the RBAC manager deciding the concrete role names below.
+	Auth web.AccessChecker
 }
 
 func (pc *PostController) Middleware() []web.Middleware {
 	return []web.Middleware{
-		web.AccessControl{Rules: []web.AccessRule{
+		web.AccessControl{Auth: pc.Auth, Rules: []web.AccessRule{
 			{Allow: true, Roles: []string{"?", "@"}, Verbs: []string{http.MethodGet, http.MethodHead}},
 			{Allow: true, Roles: []string{"@"}, Verbs: []string{http.MethodPost, http.MethodPut}},
-			{Allow: true, Roles: []string{"admin"}, Verbs: []string{http.MethodDelete}},
+			{Allow: true, Roles: []string{"post/delete"}, Verbs: []string{http.MethodDelete}},
 		}}.Middleware(),
 	}
 }
@@ -256,8 +261,9 @@ func (pc *PostController) ActionUpdate(c *web.Context) error {
 	return c.JSON(post)
 }
 
-// ActionDelete removes a post. Only the admin role gets here — the access
-// rules already rejected everyone else with 403.
+// ActionDelete removes a post. Only holders of the post/delete permission
+// get here — the access rules already rejected everyone else with 403, and
+// the seed grants it through the admin role's hierarchy.
 func (pc *PostController) ActionDelete(c *web.Context) error {
 	id, err := c.ParamInt("id")
 	if err != nil {

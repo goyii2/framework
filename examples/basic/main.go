@@ -24,6 +24,7 @@ import (
 	"github.com/goyii2/framework/console"
 	"github.com/goyii2/framework/db/ar"
 	migratecommands "github.com/goyii2/framework/migrate/commands"
+	"github.com/goyii2/framework/rbac"
 	"github.com/goyii2/framework/url"
 	"github.com/goyii2/framework/web"
 
@@ -49,7 +50,20 @@ func main() {
 
 	handler := web.NewHandler(app)
 	handler.SessionManager().IdentityFinder = findIdentity(app)
-	registerRoutes(handler, app)
+	// The RBAC manager answers user.Can and the access-control rules. It
+	// shares the application's connection and carries no code-defined rules
+	// (this example's items are unconditional), which is why NewDbManager
+	// takes none.
+	authConn, err := app.DB()
+	if err != nil {
+		fail(err)
+	}
+	auth, err := rbac.NewDbManager(authConn.DB)
+	if err != nil {
+		fail(err)
+	}
+	handler.SetAuthManager(auth)
+	registerRoutes(handler, app, auth)
 	url.SetDefault(handler.URLs()) // url.To resolves this handler's named routes
 
 	con := console.New(app, console.WithHandler(handler))
@@ -64,7 +78,7 @@ func main() {
 // registerRoutes wires the URL space. Explicit bindings cover the API;
 // /site/index stays unbound on purpose so it resolves through the
 // convention fallback (/{controller}/{action} over the root registry).
-func registerRoutes(h *web.Handler, app *base.Application) {
+func registerRoutes(h *web.Handler, app *base.Application, auth *rbac.DbManager) {
 	// Error responses negotiate JSON/HTML from the Accept header, and write
 	// requests must carry a JSON body (anything else answers 415).
 	h.Use(web.ContentNegotiator{
@@ -76,7 +90,7 @@ func registerRoutes(h *web.Handler, app *base.Application) {
 	}.Middleware())
 
 	site := &SiteController{}
-	post := &PostController{}
+	post := &PostController{Auth: auth}
 
 	sc := h.Ctrl(site)
 	sc.Get("/site/csrf", site.ActionCsrf).Name("site/csrf")

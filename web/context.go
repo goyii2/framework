@@ -41,6 +41,11 @@ type Context struct {
 	session *Session
 	user    *User
 
+	// auth is the authorization backend (AccessChecker) the handler was
+	// configured with; nil leaves access control on its identity-role
+	// defaults. The User and AccessControl read it.
+	auth AccessChecker
+
 	// views is the named-view table Context.Render resolves through; the
 	// owning Handler installs its registry, nil outside the pipeline.
 	views *view.Registry
