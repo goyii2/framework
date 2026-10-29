@@ -1,6 +1,6 @@
 # 34: Gii 代码生成器
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 **What to build:** 代码生成器命令 `goyii gii model|controller|crud`（gii 包）。model 经 GORM Migrator 读表结构，生成内嵌 ar.Model 的 struct + `Rules()` 骨架；controller 生成骨架并打印路由注册片段；crud 生成 model + controller + `.templ` 视图（list 用 GridView、form 用 ActiveForm）并提示运行 templ generate。text/template + embed 内置模板，`--templates` 目录同名覆盖；纯 flags 无交互向导；产物统一 gofmt。
 
