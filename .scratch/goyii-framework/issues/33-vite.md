@@ -1,6 +1,6 @@
 # 33: Vite 集成
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 **What to build:** vite 包：构建期 manifest.json 解析 + `vite.Entry(name)` 产出带 hash 的 script/link templ 组件（含依赖 CSS）；开发模式（配置开关或 manifest 缺失）直连 localhost:5173 并注入 `@vite/client`；ReverseProxy middleware 转发静态前缀（含 WebSocket 透传，供 HMR）。深度止于此：不做 AssetManager、不做通用资源注册表。
 
