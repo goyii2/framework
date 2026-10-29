@@ -1,0 +1,7 @@
+{
+  "You have {n} apple.": {
+    "one": "您有一个苹果。",
+    "other": "您有 {n} 个苹果。"
+  },
+  "The total is {amount}.": "总价为 {amount}。"
+}

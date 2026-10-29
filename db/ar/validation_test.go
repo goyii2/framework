@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"testing/fstest"
 
 	z "github.com/Oudwins/zog"
 
+	"github.com/goyii2/framework/i18n"
 	"github.com/goyii2/framework/validators"
 )
 
@@ -233,5 +235,38 @@ func TestModelValidateReturnsFieldMap(t *testing.T) {
 	valid.Name, valid.Email = "ada", "ada@example.com"
 	if m := valid.Validate(validators.ScenarioInsert); m != nil {
 		t.Errorf("Validate(valid record) = %v, want nil", m)
+	}
+}
+
+// TestSaveTranslatesValidationMessagesForRequestLanguage proves the save
+// chain translation: the record's bound context carries the request's
+// language, and refused writes report their messages translated while
+// keeping the field -> []messages shape.
+func TestSaveTranslatesValidationMessagesForRequestLanguage(t *testing.T) {
+	base := newValidationContext(t)
+	messages := fstest.MapFS{
+		"zh-CN/app.json": &fstest.MapFile{Data: []byte(`{"name cannot be blank": "名称不能为空"}`)},
+	}
+	ctx := i18n.WithLanguage(i18n.WithSource(base, i18n.NewMessageSource(messages)), "zh-CN")
+
+	u := New[regUser](ctx).New()
+	u.Name = "" // required on insert
+	u.Email = "ada@example.com"
+	err := u.Save()
+
+	var verrs *validators.Errors
+	if !errors.As(err, &verrs) {
+		t.Fatalf("Save error = %v, want a *validators.Errors", err)
+	}
+	if got := verrs.Fields["name"]; len(got) != 1 || got[0] != "名称不能为空" {
+		t.Errorf(`Fields["name"] = %q, want the translated message`, got)
+	}
+	// The shape survives translation: one field, one message, nothing else.
+	if len(verrs.Fields) != 1 {
+		t.Errorf("Fields = %v, want only the name field after translation", verrs.Fields)
+	}
+	// The refusal still precedes any write.
+	if n, err := New[regUser](ctx).Count(); err != nil || n != 0 {
+		t.Errorf("count after rejected insert = %d (err %v), want 0", n, err)
 	}
 }

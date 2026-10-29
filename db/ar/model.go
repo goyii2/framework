@@ -71,8 +71,10 @@ func (m *Model) Context() context.Context { return m.ctx }
 // Validate checks the record against the schemas its Rules method declares
 // for scenario and returns the per-field message list; nil means the record
 // is valid, as does a model without Rules or a scenario without a schema.
+// Messages translate into the language of the context the record is bound
+// to.
 func (m *Model) Validate(scenario validators.Scenario) map[string][]string {
-	if err := validators.Validate(m.record, scenario); err != nil {
+	if err := validators.Validate(m.ctx, m.record, scenario); err != nil {
 		return err.Fields
 	}
 	return nil
@@ -111,7 +113,7 @@ func (m *Model) validateBeforeSave(handle *gorm.DB) error {
 	}
 	// The verdict must reach Save as a plain nil on success: returning the
 	// *Errors value directly would wrap a nil pointer in a non-nil error.
-	if verrs := validators.Validate(m.record, scenario); verrs != nil {
+	if verrs := validators.Validate(m.ctx, m.record, scenario); verrs != nil {
 		return verrs
 	}
 	return nil

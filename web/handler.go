@@ -78,6 +78,7 @@ func NewHandler(app *base.Application) *Handler {
 	h.rebuildPipe()
 	h.session = NewSessionManager(app.Config().Session)
 	h.Use(h.session.Middleware())
+	h.Use(Language())
 	if !app.Config().Web.DisableCsrf {
 		h.Use(Csrf{}.Middleware())
 	}

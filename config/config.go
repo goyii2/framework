@@ -18,6 +18,7 @@ type Config struct {
 	Cache   Cache   `yaml:"cache"`
 	Log     Log     `yaml:"log"`
 	Session Session `yaml:"session"`
+	I18n    I18n    `yaml:"i18n"`
 }
 
 // App holds identity and runtime-mode values.
@@ -104,6 +105,21 @@ type Redis struct {
 	DB       int    `yaml:"db"`
 }
 
+// I18n holds the internationalization component values. The source language
+// — the language message ids are written in — is the application's own
+// App.Language; this section only steers the display side.
+type I18n struct {
+	// Language is the display language for requests that signal no
+	// preference; empty falls back to the application's source language.
+	Language string `yaml:"language"`
+
+	// MessagesDir is the directory holding the <lang>/<category>.json
+	// translation trees the default message source loads from disk.
+	// Applications embedding their translations install the embedded
+	// filesystem directly (Application.SetI18n) and ignore this value.
+	MessagesDir string `yaml:"messagesDir"`
+}
+
 // Default returns a configuration with framework defaults and no file or
 // environment values applied.
 func Default() Config {
@@ -154,6 +170,9 @@ func WithDefaults(cfg Config) Config {
 	}
 	if cfg.Session.Timeout == 0 {
 		cfg.Session.Timeout = 1440
+	}
+	if cfg.I18n.MessagesDir == "" {
+		cfg.I18n.MessagesDir = "messages"
 	}
 	return cfg
 }

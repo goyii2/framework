@@ -8,6 +8,7 @@ import (
 	"github.com/goyii2/framework/cache"
 	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/db"
+	"github.com/goyii2/framework/i18n"
 	"github.com/goyii2/framework/log"
 )
 
@@ -22,6 +23,7 @@ type Application struct {
 	log       *component[Log]
 	db        *db.Component
 	cacheComp *component[cache.Cache]
+	i18nComp  *component[*i18n.MessageSource]
 	events    eventRegistry
 	modules   moduleRegistry
 
@@ -49,6 +51,7 @@ func New(cfg config.Config) *Application {
 		log:       logComp,
 		db:        db.NewComponent(cfg.DB, dbOpts...),
 		cacheComp: newComponent(func() cache.Cache { return newDefaultCache(cfg.Cache) }),
+		i18nComp:  newComponent(func() *i18n.MessageSource { return newDefaultI18n(cfg) }),
 	}
 }
 
@@ -120,9 +123,12 @@ func (a *Application) ControllerIDs() []string { return a.controllers.ids() }
 type appKey struct{}
 
 // WithContext returns a copy of ctx carrying the application, so that
-// downstream code can retrieve it with FromContext.
+// downstream code can retrieve it with FromContext. The application's i18n
+// message source rides along under its own key, so translation helpers
+// (i18n.T, i18n.F) resolve it without depending on this package.
 func (a *Application) WithContext(ctx context.Context) context.Context {
-	return context.WithValue(ctx, appKey{}, a)
+	ctx = context.WithValue(ctx, appKey{}, a)
+	return i18n.WithSource(ctx, a.i18nComp.get())
 }
 
 // FromContext returns the application carried by ctx; when ctx carries none

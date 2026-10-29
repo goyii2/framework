@@ -1,6 +1,7 @@
 package validators
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -46,7 +47,7 @@ func (s *scripted) Rules() RuleSet { return s.rules }
 
 func TestValidateCollectsPerFieldMessages(t *testing.T) {
 	m := &member{Name: "", Email: "not-an-email"}
-	errs := Validate(m, ScenarioInsert)
+	errs := Validate(context.Background(), m, ScenarioInsert)
 	if errs == nil {
 		t.Fatal("Validate = nil, want field errors for name and email")
 	}
@@ -69,7 +70,7 @@ func TestValidateCollectsPerFieldMessages(t *testing.T) {
 
 func TestValidateSucceedsOnValidRecord(t *testing.T) {
 	m := &member{Name: "ada", Email: "ada@example.com"}
-	if errs := Validate(m, ScenarioInsert); errs != nil {
+	if errs := Validate(context.Background(), m, ScenarioInsert); errs != nil {
 		t.Fatalf("Validate(valid) = %v, want nil", errs)
 	}
 }
@@ -81,15 +82,15 @@ func TestScenariosSelectDifferentRuleSets(t *testing.T) {
 	// Name blank: rejected on insert (required), accepted on update (rule
 	// absent from the update schema).
 	blankName := &member{Name: "", Email: "ada@example.com"}
-	if errs := Validate(blankName, ScenarioInsert); errs == nil {
+	if errs := Validate(context.Background(), blankName, ScenarioInsert); errs == nil {
 		t.Error("insert scenario accepted a blank name, want rejection")
 	}
-	if errs := Validate(blankName, ScenarioUpdate); errs != nil {
+	if errs := Validate(context.Background(), blankName, ScenarioUpdate); errs != nil {
 		t.Errorf("update scenario rejected a blank name: %v, want acceptance", errs)
 	}
 
 	// Custom scenario runs its own schema.
-	login := Validate(&member{Email: "ada@example.com"}, Scenario("login"))
+	login := Validate(context.Background(), &member{Email: "ada@example.com"}, Scenario("login"))
 	if login == nil {
 		t.Fatal(`Validate(login) = nil, want rejection for the blank name`)
 	}
@@ -100,14 +101,14 @@ func TestScenariosSelectDifferentRuleSets(t *testing.T) {
 
 func TestValidatePassesModelWithoutRules(t *testing.T) {
 	type plain struct{ Name string }
-	if errs := Validate(&plain{Name: ""}, ScenarioInsert); errs != nil {
+	if errs := Validate(context.Background(), &plain{Name: ""}, ScenarioInsert); errs != nil {
 		t.Errorf("Validate(model without Rules) = %v, want nil", errs)
 	}
 }
 
 func TestValidatePassesScenarioWithoutSchema(t *testing.T) {
 	// member declares no schema for this scenario, so nothing can fail.
-	if errs := Validate(&member{Name: "", Email: ""}, Scenario("checkout")); errs != nil {
+	if errs := Validate(context.Background(), &member{Name: "", Email: ""}, Scenario("checkout")); errs != nil {
 		t.Errorf("Validate(scenario without schema) = %v, want nil", errs)
 	}
 }
@@ -117,7 +118,7 @@ func TestValidateCollectsSeveralMessagesPerField(t *testing.T) {
 	m := &scripted{Age: 7, rules: RuleSet{ScenarioInsert: z.Struct(z.Shape{
 		"age": z.Int().GT(10, z.Message("age must exceed 10")).LT(5, z.Message("age must be below 5")),
 	})}}
-	errs := Validate(m, ScenarioInsert)
+	errs := Validate(context.Background(), m, ScenarioInsert)
 	if errs == nil {
 		t.Fatal("Validate = nil, want two age messages")
 	}
@@ -144,7 +145,7 @@ func TestGlobalTemplateOverride(t *testing.T) {
 	m := &scripted{rules: RuleSet{ScenarioInsert: z.Struct(z.Shape{
 		"name": z.String().Required(),
 	})}}
-	errs := Validate(m, ScenarioInsert)
+	errs := Validate(context.Background(), m, ScenarioInsert)
 	if errs == nil {
 		t.Fatal("Validate = nil, want the required message")
 	}
@@ -158,7 +159,7 @@ func TestStructLevelIssuesLandUnderRootKey(t *testing.T) {
 	m := &scripted{Name: "x", rules: RuleSet{ScenarioInsert: z.Struct(z.Shape{
 		"name": z.String().Required(z.Message("name cannot be blank")),
 	}).TestFunc(func(val any, ctx z.Ctx) bool { return false }, z.Message("record as a whole is off"))}}
-	errs := Validate(m, ScenarioInsert)
+	errs := Validate(context.Background(), m, ScenarioInsert)
 	if errs == nil {
 		t.Fatal("Validate = nil, want the root-level message")
 	}

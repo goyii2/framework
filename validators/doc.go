@@ -33,6 +33,13 @@
 // the insert or update schema (decided by the primary key) and refuses to
 // write when validation fails. Models without Rules skip validation entirely.
 //
+// Messages translate through the context's i18n component: Validate takes
+// the request context as its first argument, and each produced message is
+// the translation id — put "name cannot be blank" into a language's app
+// category file and every 422 reply in that language carries the
+// translation. Contexts without an i18n source keep the source-language
+// text.
+//
 // Schema keys name exported struct fields (a leading lowercase letter matches
 // the corresponding capitalized field, so "name" addresses Name); a key with
 // no matching field is a programming error and panics, mirroring zog.
@@ -40,9 +47,10 @@
 // Message templates: z.Message / z.MessageFunc on the individual test is the
 // per-rule override point; the global default table lives in
 // conf.DefaultIssueMessageMap (github.com/Oudwins/zog/conf) and can be
-// replaced wholesale or per issue code. Translation of the defaults arrives
-// with the i18n component; until then the override points above are the
-// supported customization seam.
+// replaced wholesale or per issue code. Whatever text a rule produces — its
+// own z.Message or the rendered default — is then looked up in the i18n
+// app category for the request's language (see Validate); a miss keeps the
+// text verbatim.
 //
 // Wiring a validation failure back to an API client:
 //

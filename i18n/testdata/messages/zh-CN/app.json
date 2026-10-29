@@ -1,0 +1,6 @@
+{
+  "Hello, {name}!": "你好，{name}！",
+  "name cannot be blank": "名称不能为空",
+  "email is not a valid address": "邮箱不是有效地址",
+  "Only in the zh parent.": "只在 zh 父级目录。"
+}
