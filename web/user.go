@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"errors"
 	"sync"
 )
@@ -127,4 +128,37 @@ func (c *Context) ensureUser() *User {
 		c.user = &User{checker: c.auth}
 	}
 	return c.user
+}
+
+// identityKey is the unexported context key under which WithIdentity
+// carries an explicitly bound identity — the current-user seam for callers
+// outside an HTTP request.
+type identityKey struct{}
+
+// WithIdentity returns a copy of ctx carrying identity as the current
+// identity. It is how code without a request of its own — console
+// commands, background jobs, tests — publishes the operator to everything
+// resolving the user through the context (Blameable-style auditing, for
+// instance). Inside a request the session-based identity wins only where
+// WithIdentity was not used; an explicitly bound identity always takes
+// precedence, so a request handler can act on behalf of a specific user.
+func WithIdentity(ctx context.Context, identity Identity) context.Context {
+	return context.WithValue(ctx, identityKey{}, identity)
+}
+
+// IdentityFromContext resolves the current identity for ctx: the explicit
+// value WithIdentity put there, otherwise the request-scoped one from the
+// web.Context the HTTP pipeline carries (session login or a stateless
+// authenticator's transient identity). Nil when neither is present — a
+// guest or a context with no user notion at all.
+func IdentityFromContext(ctx context.Context) Identity {
+	if identity, ok := ctx.Value(identityKey{}).(Identity); ok && identity != nil {
+		return identity
+	}
+	if c := FromContext(ctx); c != nil {
+		if u := c.User(); u != nil {
+			return u.Identity()
+		}
+	}
+	return nil
 }

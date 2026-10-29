@@ -1,6 +1,7 @@
 package web_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -229,5 +230,67 @@ func TestUserZeroValueRejectsLogin(t *testing.T) {
 	}
 	if !u.IsGuest() {
 		t.Fatal("zero-value user must be a guest")
+	}
+}
+
+// TestIdentityFromContext covers the resolution seam the auditing
+// behaviors ride on: an explicitly bound identity wins, the request's own
+// user resolves otherwise, and a context without either reports nil.
+func TestIdentityFromContext(t *testing.T) {
+	if id := web.IdentityFromContext(context.Background()); id != nil {
+		t.Fatalf("plain context: identity = %v, want nil", id)
+	}
+	ctx := web.WithIdentity(context.Background(), alice)
+	if id := web.IdentityFromContext(ctx); id.GetID() != alice.GetID() {
+		t.Fatalf("explicit identity = %v, want %v", id, alice)
+	}
+	if id := web.IdentityFromContext(web.WithIdentity(ctx, nil)); id != nil {
+		t.Fatalf("nil explicit identity = %v, want nil", id)
+	}
+
+	// Through a request: a guest resolves nil, the session identity
+	// resolves by name, and an explicitly bound identity outranks the
+	// session one.
+	cfg := fileSessionConfig(t)
+	h, _ := userApp(t, cfg)
+	h.Get("/resolve", func(c *web.Context) error {
+		name := ""
+		if id := web.IdentityFromContext(c.Context()); id != nil {
+			name = id.GetName()
+		}
+		return c.JSON(map[string]string{"name": name})
+	})
+
+	res := sessionReq(t, h, http.MethodGet, "/resolve")
+	var body struct{ Name string }
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatalf("decode guest body: %v", err)
+	}
+	if body.Name != "" {
+		t.Fatalf("guest resolve: name = %q, want empty", body.Name)
+	}
+
+	ck := sessionCookieOf(t, sessionReq(t, h, http.MethodPost, "/login"), "goyii-session")
+	res = sessionReq(t, h, http.MethodGet, "/resolve", ck)
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatalf("decode logged-in body: %v", err)
+	}
+	if body.Name != alice.GetName() {
+		t.Fatalf("logged-in resolve: name = %q, want %q", body.Name, alice.GetName())
+	}
+
+	h.Get("/resolve-explicit", func(c *web.Context) error {
+		name := ""
+		if id := web.IdentityFromContext(web.WithIdentity(c.Context(), bob)); id != nil {
+			name = id.GetName()
+		}
+		return c.JSON(map[string]string{"name": name})
+	})
+	res = sessionReq(t, h, http.MethodGet, "/resolve-explicit", ck)
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatalf("decode explicit body: %v", err)
+	}
+	if body.Name != bob.GetName() {
+		t.Fatalf("explicit resolve: name = %q, want %q (explicit outranks the session)", body.Name, bob.GetName())
 	}
 }
