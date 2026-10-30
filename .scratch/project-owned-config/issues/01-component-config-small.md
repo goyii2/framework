@@ -1,6 +1,6 @@
 # 01: 组件包新形态·小组件（cache / mutex / mail / log）
 
-Status: ready-for-agent
+Status: claimed
 Blocked by: None（可立即开工）
 
 **What to build:** cache、mutex、mail、log 四个组件包率先落地统一初始化形态（见 spec 第 2 节）：每包拥有自己的 Config 参数包（字段从 config 包对应 section 迁入，yaml tag 保留），唯一构造器 `New(cfg, opts...)`，跨组件依赖经 `WithRedis` / `WithLogger` 一族选项注入；非法驱动/参数在构造期返回 error（废除 failingMutex / failingMailer 延迟失败）；默认值内聚于 New，零值 Config 构造即得默认行为。config 包旧 section 本票暂不删（03 收口），base 内工厂调用点用结构体等值转换一行过渡。
