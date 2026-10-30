@@ -35,6 +35,9 @@ func (c *Console) serve(ctx context.Context) error {
 		return errors.New("console: serve has no HTTP handler; construct the console with console.WithHandler (typically web.NewHandler(app))")
 	}
 	addr := c.listenAddr
+	if addr == "" {
+		return errors.New("console: serve has no listen address; construct the console with console.WithListen (typically the project's web.listen value)")
+	}
 	ln, err := c.listenFn(addr)
 	if err != nil {
 		return fmt.Errorf("console: listen on %s: %w", addr, err)

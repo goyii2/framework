@@ -2,13 +2,13 @@
 // github.com/spf13/cobra; it corresponds to Yii2's yii\console subsystem.
 //
 // A Console wraps the same *base.Application the web handler uses, so CLI
-// commands and HTTP requests share one configuration source and one set of
-// components. The root command ("goyii") carries the built-in serve
-// subcommand; applications attach their own cobra commands with AddCommand:
+// commands and HTTP requests share one set of components. The root command
+// ("goyii") carries the built-in serve subcommand; applications attach their
+// own cobra commands with AddCommand:
 //
-//	app := base.New(goyii.LoadConfig("config/"))
+//	app := base.New(base.WithApp("myapp", "dev", false))
 //	h := web.NewHandler(app)
-//	c := console.New(app, console.WithHandler(h))
+//	c := console.New(app, console.WithHandler(h), console.WithListen("127.0.0.1:8080"))
 //	c.AddCommand(&cobra.Command{Use: "hello", Short: "Greet", RunE: runHello})
 //	if err := c.Execute(); err != nil {
 //		os.Exit(1)

@@ -351,6 +351,27 @@ func TestServeWithoutHandlerReportsSetupError(t *testing.T) {
 	}
 }
 
+// TestServeWithoutListenAddressReportsSetupError pins the other half of the
+// explicit-option contract: the framework owns no configuration, so a console
+// assembled without WithListen must refuse to serve with an error naming the
+// missing option instead of guessing an address.
+func TestServeWithoutListenAddressReportsSetupError(t *testing.T) {
+	app, _ := newTestApp()
+	h := web.NewHandler(app)
+	c := New(app, WithHandler(h)) // handler present, listen address missing
+	c.Command().SetArgs([]string{"serve"})
+	c.Command().SetErr(io.Discard)
+	err := c.Execute()
+	if err == nil {
+		t.Fatal("serve without a listen address = nil error, want setup error")
+	}
+	for _, want := range []string{"no listen address", "console.WithListen"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %v, want it to mention %q", err, want)
+		}
+	}
+}
+
 // TestExecuteClosesLogTargets pins the process-shutdown hook: whatever
 // command ran, the console releases the application's log targets afterwards.
 // A file target that was closed reports every further write, which is exactly

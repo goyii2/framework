@@ -54,7 +54,8 @@ func WithHandler(h http.Handler) Option {
 
 // WithListen sets the address the serve subcommand listens on — typically
 // the project's web.listen value; the assembly injects it here since the
-// framework owns no configuration. Default ":8080".
+// framework owns no configuration. Without it serve fails with a setup
+// error instead of guessing an address.
 func WithListen(addr string) Option {
 	return func(c *Console) { c.listenAddr = addr }
 }
@@ -70,7 +71,6 @@ func WithShutdownTimeout(d time.Duration) Option {
 func New(app *base.Application, opts ...Option) *Console {
 	c := &Console{
 		app:             app,
-		listenAddr:      ":8080",
 		shutdownTimeout: DefaultShutdownTimeout,
 		listenFn: func(addr string) (net.Listener, error) {
 			return net.Listen("tcp", addr)
