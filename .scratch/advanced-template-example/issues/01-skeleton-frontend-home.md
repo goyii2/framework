@@ -1,6 +1,6 @@
 # 01: 骨架与前台首页
 
-Status: ready-for-agent
+Status: claimed
 Blocked by: None（可立即开工）
 
 **What to build:** `examples/advanced` 端到端可运行的骨架：项目配置（app.yaml + web-dev overlay）经代码装配为 Application，frontend 分区以根作用域提供首页，console 提供 migrate/serve，user 表迁移先行落地 common 分区。演示：`go run . migrate up && go run . serve` 后访问 `/` 返回带亮色 Layout 的前台首页。main.go 只做组装，frontend 分区经自身装配函数注册。详见同目录 spec.md。
