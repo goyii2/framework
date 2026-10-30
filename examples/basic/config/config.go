@@ -48,6 +48,13 @@ type Config struct {
 	Mail    mail.Config    `yaml:"mail"`
 	Log     log.Config     `yaml:"log"`
 
+	// Stats is the secondary database of the multi-database walkthrough: a
+	// second db.Config under its own yaml key, so its env overrides carry the
+	// STATS_ prefix (STATS_DRIVER, STATS_DSN). The connection is a project
+	// asset assembled in main.go (not the application's primary db slot) and
+	// registers as the migrate target "stats" (migrate --db=stats up).
+	Stats db.Config `yaml:"stats"`
+
 	// I18n picks the display language for requests that signal no
 	// preference; the message trees themselves are embedded in the binary.
 	I18n struct {

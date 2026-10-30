@@ -1,13 +1,16 @@
 // Package commands provides the goyii migrate command tree: the eight
 // subcommands (up, down, redo, history, new, mark, to, create) of the
 // standalone yiimigrate CLI this framework's migrate package was merged
-// from, here attached below the goyii console root command.
+// from, here attached below the goyii console root command. Besides the
+// application's primary database, named targets passed in at assembly time
+// (see Target) are addressed with the --db flag.
 package commands
 
 import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -18,32 +21,85 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/goyii2/framework/base"
+	"github.com/goyii2/framework/db"
 	"github.com/goyii2/framework/migrate"
 	"github.com/goyii2/framework/migrate/internal/generator"
 )
 
+// Target is a named migration target besides the primary database: the
+// connection the project assembled itself (db.New at boot) and that
+// database's own migration list. Projects pass targets to New at assembly
+// time; the Application carries no connection registry — a secondary
+// database stays a project asset exactly like any custom component.
+type Target struct {
+	// Name addresses the target from the command line (migrate --db=NAME up).
+	Name string
+	// Conn is the project-assembled connection the migrations run on.
+	Conn *db.Conn
+	// Migrations is that database's own apply-ordered list.
+	Migrations []migrate.Migration
+}
+
 // New returns the "migrate" parent command with the eight subcommands.
-// The database commands run on the application's db component (app.DB, the
-// connection DML shares), so the dialect follows the opened connection; the
-// MIGRATE_TABLE / MIGRATE_DRY_RUN environment variables keep their effect
-// from the standalone yiimigrate CLI. migrations is the application's
-// registered migration list, typically migrations.All().
-func New(app *base.Application, migrations []migrate.Migration) *cobra.Command {
+// Without --db the database commands run on the application's db component
+// (app.DB, the connection DML shares) over migrations, the application's
+// primary migration list; --db=NAME selects a named target from targets,
+// running that target's own migration list on its connection. The dialect
+// always follows the opened connection; the MIGRATE_TABLE / MIGRATE_DRY_RUN
+// environment variables keep their effect from the standalone yiimigrate
+// CLI. A duplicate or nameless target panics at assembly time — both are
+// wiring mistakes, and boot is where they should surface.
+func New(app *base.Application, migrations []migrate.Migration, targets ...Target) *cobra.Command {
+	tree := &migrateTree{
+		app:     app,
+		primary: migrations,
+		targets: targetMap(targets),
+	}
 	root := &cobra.Command{
 		Use:   "migrate",
 		Short: "Apply and inspect versioned database migrations",
 	}
+	root.PersistentFlags().String("db", "", "named migration target (default: the application's primary database)")
 	root.AddCommand(
-		newLimitCommand(app, migrations, "up", "Apply pending migrations (default: all pending)", 0, runUp),
-		newLimitCommand(app, migrations, "down", "Revert applied migrations (default: the most recent one)", 1, runDown),
-		newLimitCommand(app, migrations, "redo", "Revert and re-apply migrations (default: the most recent one)", 1, runRedo),
-		newLimitCommand(app, migrations, "history", "Show applied migrations (default: 10)", 10, runHistory),
-		newLimitCommand(app, migrations, "new", "Show pending migrations (default: 10)", 10, runNew),
-		newMarkCommand(app, migrations),
-		newToCommand(app, migrations),
+		newLimitCommand(tree, "up", "Apply pending migrations (default: all pending)", 0, runUp),
+		newLimitCommand(tree, "down", "Revert applied migrations (default: the most recent one)", 1, runDown),
+		newLimitCommand(tree, "redo", "Revert and re-apply migrations (default: the most recent one)", 1, runRedo),
+		newLimitCommand(tree, "history", "Show applied migrations (default: 10)", 10, runHistory),
+		newLimitCommand(tree, "new", "Show pending migrations (default: 10)", 10, runNew),
+		newMarkCommand(tree),
+		newToCommand(tree),
 		newCreateCommand(app),
 	)
 	return root
+}
+
+// migrateTree carries what the database subcommands resolve against: the
+// application (primary connection), the primary migration list, and the
+// named targets the project registered.
+type migrateTree struct {
+	app     *base.Application
+	primary []migrate.Migration
+	targets map[string]Target
+}
+
+// targetMap indexes targets by name, panicking on the wiring mistakes New's
+// comment describes.
+func targetMap(targets []Target) map[string]Target {
+	byName := make(map[string]Target, len(targets))
+	for _, target := range targets {
+		name := strings.TrimSpace(target.Name)
+		if name == "" {
+			panic("migrate: target with empty name")
+		}
+		if target.Conn == nil {
+			panic("migrate: target " + name + " has no connection")
+		}
+		if _, dup := byName[name]; dup {
+			panic("migrate: duplicate target name " + name)
+		}
+		byName[name] = target
+	}
+	return byName
 }
 
 // driverAliases maps configured dialect spellings (including the empty
@@ -78,14 +134,27 @@ func unsupportedDialectError(name string) error {
 	return fmt.Errorf("unsupported db dialect %q; supported values: %s", name, strings.Join(migrate.DialectNames(), ", "))
 }
 
-// openMigrator resolves the migrator over the application's db component:
-// the connection DML shares, its dialect following the opened connection's
-// driver. The connection's lifetime belongs to the application — callers do
-// not close it. The sqlite driver is the pure-Go glebarez driver — the same
-// registration the db component's GORM layer uses — so both layers coexist
-// in one binary without duplicate driver registrations.
-func openMigrator(app *base.Application, migrations []migrate.Migration) (*migrate.Migrator, error) {
-	conn := app.DB()
+// openMigrator resolves the migrator for the --db target named on the
+// command line: the application's primary database (app.DB, the connection
+// DML shares) with the primary migration list by default, or a named target
+// with its own connection and list. The connections' lifetime belongs to
+// their owner (the application, the project) — callers do not close them.
+// The sqlite driver is the pure-Go glebarez driver — the same registration
+// the db component's GORM layer uses — so both layers coexist in one binary
+// without duplicate driver registrations.
+func (t *migrateTree) openMigrator(cmd *cobra.Command) (*migrate.Migrator, error) {
+	name, err := cmd.Flags().GetString("db")
+	if err != nil {
+		return nil, err
+	}
+	conn, migrations := t.app.DB(), t.primary
+	if name != "" {
+		target, ok := t.targets[name]
+		if !ok {
+			return nil, fmt.Errorf("unknown migrate target %q; registered targets: %s", name, registeredNames(t.targets))
+		}
+		conn, migrations = target.Conn, target.Migrations
+	}
 	_, dialect, err := resolveDriver(conn.Driver())
 	if err != nil {
 		return nil, err
@@ -101,6 +170,20 @@ func openMigrator(app *base.Application, migrations []migrate.Migration) (*migra
 	migrator.DryRun = envBool("MIGRATE_DRY_RUN")
 	migrator.UseLock = dialectLockable(dialect)
 	return migrator, nil
+}
+
+// registeredNames lists the registered target names for unknown-target
+// errors, alphabetically; an empty roster says so explicitly.
+func registeredNames(targets map[string]Target) string {
+	if len(targets) == 0 {
+		return "(none)"
+	}
+	names := make([]string, 0, len(targets))
+	for name := range targets {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
 }
 
 // dialectLockable reports whether the dialect supports advisory migration
@@ -125,13 +208,13 @@ type limitRunner func(ctx context.Context, cmd *cobra.Command, migrator *migrate
 
 // newLimitCommand builds a subcommand taking at most one optional numeric
 // argument (the limit, defaulting to fallback) over fn.
-func newLimitCommand(app *base.Application, migrations []migrate.Migration, use, short string, fallback int, fn limitRunner) *cobra.Command {
+func newLimitCommand(tree *migrateTree, use, short string, fallback int, fn limitRunner) *cobra.Command {
 	return &cobra.Command{
 		Use:   use + " [limit]",
 		Short: short,
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			migrator, err := openMigrator(app, migrations)
+			migrator, err := tree.openMigrator(cmd)
 			if err != nil {
 				return err
 			}
@@ -180,13 +263,13 @@ func runNew(ctx context.Context, cmd *cobra.Command, migrator *migrate.Migrator,
 // newMarkCommand builds "migrate mark VERSION": VERSION "0" clears the
 // migration history, any other value re-marks history up to that version,
 // without running migration code.
-func newMarkCommand(app *base.Application, migrations []migrate.Migration) *cobra.Command {
+func newMarkCommand(tree *migrateTree) *cobra.Command {
 	return &cobra.Command{
 		Use:   "mark VERSION",
 		Short: "Modify the migration history without running migrations",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			migrator, err := openMigrator(app, migrations)
+			migrator, err := tree.openMigrator(cmd)
 			if err != nil {
 				return err
 			}
@@ -197,13 +280,13 @@ func newMarkCommand(app *base.Application, migrations []migrate.Migration) *cobr
 
 // newToCommand builds "migrate to VERSION": migrates up or down until
 // VERSION is the latest applied migration.
-func newToCommand(app *base.Application, migrations []migrate.Migration) *cobra.Command {
+func newToCommand(tree *migrateTree) *cobra.Command {
 	return &cobra.Command{
 		Use:   "to VERSION",
 		Short: "Migrate up or down until VERSION is the latest applied migration",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			migrator, err := openMigrator(app, migrations)
+			migrator, err := tree.openMigrator(cmd)
 			if err != nil {
 				return err
 			}

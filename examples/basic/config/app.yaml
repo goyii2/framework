@@ -23,6 +23,14 @@ db:
   # "database is locked" failures.
   dsn: runtime/basic.sqlite?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)
 
+stats:
+  # The secondary database of the multi-database walkthrough: a project-owned
+  # connection assembled in main.go and registered there as the migrate
+  # target "stats" (migrate --db=stats up). Its env overrides carry the yaml
+  # key as prefix: STATS_DRIVER, STATS_DSN.
+  driver: sqlite
+  dsn: runtime/stats.sqlite?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)
+
 queue:
   # The db driver stores messages in the queue table (created by
   # queue.NewMigration through the migrate command); workers consume them

@@ -41,28 +41,47 @@ var flowMigrations = []migrate.Migration{
 }
 
 // newConsole builds a console with the migrate command tree attached over a
-// sqlite-backed application (the connection DML shares); run returns the
-// command's error and the captured output.
-func newConsole(t *testing.T, dsn string, migrations []migrate.Migration) (*console.Console, *strings.Builder) {
+// sqlite-backed application (the connection DML shares) plus any named
+// targets; run returns the command's error and the captured output.
+func newConsole(t *testing.T, dsn string, migrations []migrate.Migration, targets ...Target) (*console.Console, *strings.Builder) {
 	t.Helper()
 	app := base.New()
-	conn, err := db.New(db.Config{Driver: "sqlite", DSN: dsn})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	t.Cleanup(func() { _ = conn.Close() })
+	conn := sqliteConn(t, dsn)
 	app.SetDB(conn)
 	var out strings.Builder
-	c := console.New(app).AddCommand(New(app, migrations))
+	c := console.New(app).AddCommand(New(app, migrations, targets...))
 	c.Command().SetOut(&out)
 	c.Command().SetErr(&out)
 	return c, &out
 }
 
+// sqliteConn opens a throwaway sqlite connection the test closes on cleanup.
+func sqliteConn(t *testing.T, dsn string) *db.Conn {
+	t.Helper()
+	conn, err := db.New(db.Config{Driver: "sqlite", DSN: dsn})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	return conn
+}
+
+// runMigrate runs one migrate invocation as if it were a fresh process.
+// cobra keeps previously parsed flag values on a reused command tree, so the
+// --db flag resets before every call — otherwise an earlier --db=stats run
+// would keep routing a later plain "up" to the stats target.
 func runMigrate(t *testing.T, c *console.Console, args ...string) error {
 	t.Helper()
-	c.Command().SetArgs(append([]string{"migrate"}, args...))
-	return c.Command().Execute()
+	root := c.Command()
+	for _, cmd := range root.Commands() {
+		if cmd.Name() == "migrate" {
+			if f := cmd.PersistentFlags().Lookup("db"); f != nil {
+				_ = f.Value.Set("")
+			}
+		}
+	}
+	root.SetArgs(append([]string{"migrate"}, args...))
+	return root.Execute()
 }
 
 // querySQLite runs one scalar query against the sqlite file behind dsn.
@@ -457,4 +476,94 @@ func TestDefaultCreateDialectFollowsConnectionAndEnvironment(t *testing.T) {
 	if got := defaultCreateDialect(app); got != "sqlserver" {
 		t.Fatalf("defaultCreateDialect() with DB_DIALECT = %q, want sqlserver", got)
 	}
+}
+
+// TestMigrateNamedTargetRunsOnItsOwnDatabase is the --db acceptance: the
+// named target's migrations apply to its connection only, and the primary
+// database keeps working untouched afterwards.
+func TestMigrateNamedTargetRunsOnItsOwnDatabase(t *testing.T) {
+	primaryDSN, statsDSN := sqliteDSN(t), sqliteDSN(t)
+	statsMigrations := []migrate.Migration{
+		tableMigration{name: "m20260101_000001_create_stats_table", table: "stats_only"},
+	}
+	c, out := newConsole(t, primaryDSN, flowMigrations, Target{
+		Name:       "stats",
+		Conn:       sqliteConn(t, statsDSN),
+		Migrations: statsMigrations,
+	})
+
+	if err := runMigrate(t, c, "--db=stats", "up"); err != nil {
+		t.Fatalf("migrate --db=stats up error = %v", err)
+	}
+	if got := tableCount(t, statsDSN, "stats_only"); got != 1 {
+		t.Fatalf("stats target after up: table stats_only = %d rows in sqlite_master, want 1", got)
+	}
+	if got := appliedCount(t, statsDSN); got != 1 {
+		t.Fatalf("stats target history after up: %d rows, want 1", got)
+	}
+	// The primary database is untouched by the --db=stats run: no history
+	// table was even created there.
+	if got := tableCount(t, primaryDSN, "migration"); got != 0 {
+		t.Fatalf("primary after --db=stats up: history table = %d rows in sqlite_master, want 0", got)
+	}
+	if got := tableCount(t, primaryDSN, "first"); got != 0 {
+		t.Fatalf("primary after --db=stats up: table first = %d rows in sqlite_master, want 0", got)
+	}
+
+	out.Reset()
+	if err := runMigrate(t, c, "--db=stats", "history"); err != nil {
+		t.Fatalf("migrate --db=stats history error = %v", err)
+	}
+	if !strings.Contains(out.String(), statsMigrations[0].Name()) {
+		t.Fatalf("stats history output %q must list the applied migration", out.String())
+	}
+
+	// The default (no --db) still runs the primary list on the primary
+	// connection, target and primary side by side.
+	if err := runMigrate(t, c, "up"); err != nil {
+		t.Fatalf("migrate up error = %v", err)
+	}
+	if got := appliedCount(t, primaryDSN); got != 2 {
+		t.Fatalf("primary history after up: %d rows, want 2", got)
+	}
+	if got := tableCount(t, primaryDSN, "first"); got != 1 {
+		t.Fatalf("primary table first after up: %d rows in sqlite_master, want 1", got)
+	}
+}
+
+func TestMigrateUnknownTargetListsRegisteredNames(t *testing.T) {
+	c, _ := newConsole(t, sqliteDSN(t), flowMigrations, Target{
+		Name:       "stats",
+		Conn:       sqliteConn(t, sqliteDSN(t)),
+		Migrations: flowMigrations[:1],
+	})
+
+	err := runMigrate(t, c, "--db=analytics", "up")
+	if err == nil {
+		t.Fatal("migrate --db=analytics must fail: no such target")
+	}
+	for _, want := range []string{"analytics", "stats"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q must mention %q", err, want)
+		}
+	}
+}
+
+func TestMigrateDuplicateTargetPanicsAtAssembly(t *testing.T) {
+	app := base.New()
+	conn := sqliteConn(t, sqliteDSN(t))
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("a duplicate target name must panic at assembly time")
+		}
+		msg, _ := r.(string)
+		if !strings.Contains(msg, "stats") {
+			t.Errorf("panic message = %q, want it to name the duplicated target", msg)
+		}
+	}()
+	New(app, flowMigrations,
+		Target{Name: "stats", Conn: conn, Migrations: flowMigrations[:1]},
+		Target{Name: "stats", Conn: conn, Migrations: flowMigrations[:1]},
+	)
 }

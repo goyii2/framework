@@ -43,6 +43,7 @@ import (
 	// defines, from app.yaml + web-<env>.yaml + environment variables.
 	goyii "github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/console"
+	"github.com/goyii2/framework/db"
 	"github.com/goyii2/framework/db/ar"
 	"github.com/goyii2/framework/debug"
 	"github.com/goyii2/framework/examples/basic/commands"
@@ -52,6 +53,7 @@ import (
 	"github.com/goyii2/framework/examples/basic/migrations"
 	"github.com/goyii2/framework/examples/basic/models"
 	"github.com/goyii2/framework/examples/basic/notifier"
+	"github.com/goyii2/framework/examples/basic/statsmigrations"
 	"github.com/goyii2/framework/examples/basic/views"
 	"github.com/goyii2/framework/i18n"
 	"github.com/goyii2/framework/log"
@@ -104,6 +106,13 @@ func main() {
 	app := base.New(base.WithApp(cfg.App.Name, goyii.Env(), cfg.App.Debug))
 	app.SetLog(logger)
 	if err := app.ConnectDB(cfg.DB, cfg.Log.Gorm); err != nil {
+		fail(err)
+	}
+	// The secondary database: a project asset like any custom component,
+	// assembled here and handed to its consumers — the only framework surface
+	// it touches is the migrate target registered below (migrate --db=stats).
+	statsConn, err := db.New(cfg.Stats)
+	if err != nil {
 		fail(err)
 	}
 	cacheC, err := cache.New(cfg.Cache)
@@ -173,7 +182,9 @@ func main() {
 	url.SetDefault(handler.URLs()) // url.To resolves this handler's named routes
 
 	con := console.New(app, console.WithHandler(handler), console.WithListen(cfg.Web.Listen))
-	con.AddCommand(migratecommands.New(app, migrations.All()))
+	con.AddCommand(migratecommands.New(app, migrations.All(),
+		migratecommands.Target{Name: "stats", Conn: statsConn, Migrations: statsmigrations.All()},
+	))
 	con.AddCommand(queuecommands.New(app))
 	con.AddCommand(commands.NewSeedCommand())
 	if err := con.Execute(); err != nil {
