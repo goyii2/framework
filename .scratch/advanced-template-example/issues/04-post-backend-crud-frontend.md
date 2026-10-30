@@ -1,6 +1,6 @@
 # 04: Post 全链路——后台 CRUD、前台展示
 
-Status: ready-for-agent
+Status: claimed
 Blocked by: 03（backend 模块、RBAC 守卫与 seed）
 
 **What to build:** common 分区新增 Post 模型（迁移 + ActiveRecord + 验证场景），backend 模块内文章管理（列表/新建/编辑/删除，服务端表单 + 校验错误回显），前台文章列表与详情页。演示高级模板核心场景：admin 在后台发布内容，匿名用户在前台浏览。
