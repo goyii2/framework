@@ -6,8 +6,6 @@ import (
 	"os"
 	"strings"
 	"time"
-
-	"github.com/goyii2/framework/config"
 )
 
 // DefaultCategory is the category records fall under when none is given,
@@ -41,9 +39,12 @@ type Logger struct {
 	forward LevelLogger
 }
 
-// New builds a logger dispatching to targets with no additional filtering
-// (every target receives every record at or above level).
-func New(level slog.Level, targets ...Target) *Logger {
+// NewWithTargets builds a logger dispatching to already-constructed targets
+// with no additional filtering (every target receives every record at or
+// above level). It is the programmatic counterpart of New: use it when the
+// sinks are built in code — custom targets, test captures — rather than
+// named in a Config.
+func NewWithTargets(level slog.Level, targets ...Target) *Logger {
 	l := &Logger{level: level, category: DefaultCategory}
 	for _, t := range targets {
 		if t == nil {
@@ -74,62 +75,6 @@ func (l *Logger) WithTarget(t Target, f Filter) *Logger {
 	clone := *l
 	clone.bindings = append(append([]binding(nil), l.bindings...), binding{target: t, filter: f})
 	return &clone
-}
-
-// NewFromConfig builds a logger from the log configuration section: each
-// configured target is constructed, bound to its delivery rules, and
-// appended; with no targets configured a single console target on stdout is
-// installed. An error is returned when a target cannot be built (unknown
-// type, unwritable path), listing every failure; no logger is usable then,
-// callers decide on a fallback.
-func NewFromConfig(cfg config.Log) (*Logger, error) {
-	level := ParseLevel(cfg.Level)
-	l := &Logger{level: level, category: DefaultCategory}
-
-	if len(cfg.Targets) == 0 {
-		l.bindings = append(l.bindings, binding{target: NewConsoleTarget(nil), filter: Filter{MinLevel: slog.LevelDebug}})
-		return l, nil
-	}
-
-	var errs []string
-	for _, tc := range cfg.Targets {
-		t, err := buildTarget(tc)
-		if err != nil {
-			errs = append(errs, err.Error())
-			continue
-		}
-		// An unset minLevel adds no floor of its own; the logger level is
-		// the only gate then.
-		filter := Filter{MinLevel: slog.LevelDebug, Includes: tc.Categories, Excludes: tc.Except}
-		if strings.TrimSpace(tc.MinLevel) != "" {
-			filter.MinLevel = ParseLevel(tc.MinLevel)
-		}
-		l.bindings = append(l.bindings, binding{target: t, filter: filter})
-	}
-	if len(errs) > 0 {
-		return nil, fmt.Errorf("log: %s", strings.Join(errs, "; "))
-	}
-	return l, nil
-}
-
-// buildTarget constructs the built-in target named by the configuration.
-func buildTarget(tc config.LogTarget) (Target, error) {
-	switch strings.ToLower(strings.TrimSpace(tc.Type)) {
-	case "console", "":
-		return NewConsoleTarget(nil), nil
-	case "file":
-		maxSize := int64(tc.MaxSizeMB) * 1024 * 1024
-		if maxSize <= 0 {
-			maxSize = 10 * 1024 * 1024
-		}
-		maxFiles := tc.MaxFiles
-		if maxFiles <= 0 {
-			maxFiles = 5
-		}
-		return NewFileTarget(tc.Path, maxSize, maxFiles)
-	default:
-		return nil, fmt.Errorf("log target type %q is unknown (supported: console, file)", tc.Type)
-	}
 }
 
 // ParseLevel maps a configured level name to a slog level; the empty name

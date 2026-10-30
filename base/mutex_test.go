@@ -2,7 +2,6 @@ package base
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -84,12 +83,19 @@ func TestApplicationMutexRedisUsesSharedConnection(t *testing.T) {
 	}
 }
 
-// TestApplicationMutexUnknownDriverFailsOnUse verifies a misspelled driver
-// surfaces at first acquisition instead of breaking application assembly.
-func TestApplicationMutexUnknownDriverFailsOnUse(t *testing.T) {
+// TestApplicationMutexUnknownDriverFallsBackToProcess verifies a misspelled
+// driver is rejected by the constructor and the application degrades to the
+// process driver (with a warning) instead of handing out a component that
+// fails on every acquisition.
+func TestApplicationMutexUnknownDriverFallsBackToProcess(t *testing.T) {
 	app := New(config.Config{Mutex: config.Mutex{Driver: "bogus"}})
 
-	if _, err := app.Mutex().Lock(context.Background(), "job", time.Minute); err == nil || !strings.Contains(err.Error(), "unknown driver") {
-		t.Fatalf("Lock through a bad driver: err=%v, want unknown-driver error", err)
+	if _, ok := app.Mutex().(*mutex.Process); !ok {
+		t.Fatalf("Mutex() through a bad driver is %T, want the process fallback", app.Mutex())
 	}
+	release, err := app.Mutex().Lock(context.Background(), "job", time.Minute)
+	if err != nil {
+		t.Fatalf("Lock through the fallback: %v", err)
+	}
+	release()
 }

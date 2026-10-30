@@ -58,7 +58,7 @@ func TestWithLevelLowersDispatchFloor(t *testing.T) {
 	target := NewMemoryTarget(10)
 	// A logger at info level drops debug records before any target runs;
 	// WithLevel returns a copy dispatching at the new level.
-	l := New(slog.LevelInfo, target)
+	l := NewWithTargets(slog.LevelInfo, target)
 	l.Debug("dropped")
 	if target.Len() != 0 {
 		t.Fatalf("info-level logger dispatched a debug record: %d", target.Len())

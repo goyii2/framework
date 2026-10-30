@@ -28,12 +28,39 @@ type Log interface {
 // on stderr and the component degrades to console-only logging so the
 // application still starts.
 func newDefaultLog(cfg config.Log) Log {
-	l, err := log.NewFromConfig(cfg)
+	l, err := log.New(logConfigOf(cfg))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "goyii: %v; falling back to console logging\n", err)
-		return log.New(log.ParseLevel(cfg.Level), log.NewConsoleTarget(nil))
+		// The fallback names no targets, so it lands on the console default
+		// and cannot fail.
+		l, _ = log.New(log.Config{Level: cfg.Level})
 	}
 	return l
+}
+
+// logConfigOf is the transitional struct-equivalence conversion from the
+// config package's log section to the log package's parameter bundle; it
+// goes away once the application stops carrying a config object.
+func logConfigOf(cfg config.Log) log.Config {
+	out := log.Config{
+		Level: cfg.Level,
+		Gorm: log.GormConfig{
+			Disable:         cfg.Gorm.Disable,
+			SlowThresholdMs: cfg.Gorm.SlowThresholdMs,
+		},
+	}
+	for _, t := range cfg.Targets {
+		out.Targets = append(out.Targets, log.TargetConfig{
+			Type:       t.Type,
+			MinLevel:   t.MinLevel,
+			Categories: t.Categories,
+			Except:     t.Except,
+			Path:       t.Path,
+			MaxSizeMB:  t.MaxSizeMB,
+			MaxFiles:   t.MaxFiles,
+		})
+	}
+	return out
 }
 
 // loggerOf resolves a log component holder to its rich concrete type. The

@@ -1,6 +1,9 @@
 package base
 
 import (
+	"fmt"
+	"os"
+
 	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/mail"
 )
@@ -20,7 +23,19 @@ func (a *Application) SetMailer(m mail.Mailer) { a.mailComp.set(m) }
 // newDefaultMail builds the default mail component from the mail
 // configuration section. Delivery-independent mailer output (the log
 // mailer's recorded messages) goes through the application's log component
-// under the "mail" category.
+// under the "mail" category. A section the constructor rejects (an unknown
+// driver, smtp without a host) is reported on stderr and degrades to the log
+// mailer so the application still starts.
 func newDefaultMail(cfg config.Config, logComp *component[Log]) mail.Mailer {
-	return mail.NewFromConfig(cfg.Mail, loggerOf(logComp).Category("mail"))
+	sink := loggerOf(logComp).Category("mail")
+	m, err := mail.New(mail.Config{
+		Driver: cfg.Mail.Driver,
+		From:   cfg.Mail.From,
+		SMTP:   mail.SMTPConfig(cfg.Mail.SMTP),
+	}, mail.WithLogger(sink))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "goyii: %v; falling back to the log mailer\n", err)
+		return mail.NewLogMailer(sink)
+	}
+	return m
 }

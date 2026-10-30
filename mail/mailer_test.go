@@ -7,58 +7,65 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/log"
 )
 
-func TestNewFromConfigDefaultsToLogMailer(t *testing.T) {
+func TestNewDefaultsToLogMailer(t *testing.T) {
 	sink := &recordingSink{}
 	for _, driver := range []string{"", "log", "LOG"} {
-		m := NewFromConfig(config.Mail{Driver: driver}, sink)
+		m, err := New(Config{Driver: driver}, WithLogger(sink))
+		if err != nil {
+			t.Fatalf("driver %q: %v", driver, err)
+		}
 		if _, ok := m.(*LogMailer); !ok {
 			t.Errorf("driver %q produced %T, want *LogMailer", driver, m)
 		}
 	}
 }
 
-func TestNewFromConfigSmtpDriver(t *testing.T) {
-	m := NewFromConfig(config.Mail{
+func TestNewSmtpDriver(t *testing.T) {
+	m, err := New(Config{
 		Driver: "smtp",
-		SMTP:   config.SMTP{Host: "mail.example.com", Port: 25, Encryption: "none"},
+		SMTP:   SMTPConfig{Host: "mail.example.com", Port: 25, Encryption: "none"},
 	}, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 	if _, ok := m.(*SmtpMailer); !ok {
 		t.Errorf("smtp driver produced %T, want *SmtpMailer", m)
 	}
 }
 
-func TestNewFromConfigFailuresSurfaceAtSend(t *testing.T) {
+func TestNewRejectsUnusableConfig(t *testing.T) {
 	cases := []struct {
 		name string
-		cfg  config.Mail
+		cfg  Config
 		want string
 	}{
-		{"unknown driver", config.Mail{Driver: "pirate"}, "unknown driver"},
-		{"smtp without host", config.Mail{Driver: "smtp"}, "host is required"},
-		{"bad encryption", config.Mail{Driver: "smtp", SMTP: config.SMTP{Host: "m.example.com", Encryption: "x"}}, "encryption"},
-		{"invalid default from", config.Mail{Driver: "log", From: "not an address"}, "mail.from"},
+		{"unknown driver", Config{Driver: "pirate"}, "unknown driver"},
+		{"smtp without host", Config{Driver: "smtp"}, "host is required"},
+		{"bad encryption", Config{Driver: "smtp", SMTP: SMTPConfig{Host: "m.example.com", Encryption: "x"}}, "encryption"},
+		{"invalid default from", Config{Driver: "log", From: "not an address"}, "mail.from"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			m := NewFromConfig(tc.cfg, nil)
-			err := m.Send(context.Background(), NewMessage().SetFrom("a@example.com").SetTextBody("hi"))
+			_, err := New(tc.cfg)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("Send error = %v, want it to contain %q", err, tc.want)
+				t.Fatalf("New error = %v, want it to contain %q", err, tc.want)
 			}
 		})
 	}
 }
 
-func TestNewFromConfigDefaultFromApplied(t *testing.T) {
+func TestNewDefaultFromApplied(t *testing.T) {
 	sink := &recordingSink{}
-	m := NewFromConfig(config.Mail{
+	m, err := New(Config{
 		Driver: "log",
 		From:   "Robot <noreply@example.com>",
-	}, sink)
+	}, WithLogger(sink))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 
 	// A message without its own sender gets the configured one...
 	msg := NewMessage().SetTo("grace@example.com").SetTextBody("hi")
@@ -129,17 +136,20 @@ func (c *captureTarget) all() []log.Record {
 	return append([]log.Record(nil), c.records...)
 }
 
-// TestNewFromConfigWithFrameworkLogger wires the LogMailer through the
-// framework log component so messages land in the application's targets.
-func TestNewFromConfigWithFrameworkLogger(t *testing.T) {
+// TestNewWithFrameworkLogger wires the LogMailer through the framework log
+// component so messages land in the application's targets.
+func TestNewWithFrameworkLogger(t *testing.T) {
 	target := &captureTarget{}
-	m := NewFromConfig(config.Mail{Driver: "log"}, log.New(slog.LevelInfo, target))
+	m, err := New(Config{Driver: "log"}, WithLogger(log.NewWithTargets(slog.LevelInfo, target)))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 
-	err := m.Send(context.Background(), NewMessage().
+	sendErr := m.Send(context.Background(), NewMessage().
 		SetFrom("Ada <ada@example.com>").SetTo("grace@example.com").
 		SetSubject("through the framework log").SetTextBody("body"))
-	if err != nil {
-		t.Fatalf("Send: %v", err)
+	if sendErr != nil {
+		t.Fatalf("Send: %v", sendErr)
 	}
 
 	records := target.all()

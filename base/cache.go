@@ -1,6 +1,9 @@
 package base
 
 import (
+	"fmt"
+	"os"
+
 	"github.com/redis/go-redis/v9"
 
 	"github.com/goyii2/framework/cache"
@@ -21,13 +24,27 @@ func (a *Application) SetCache(c cache.Cache) { a.cacheComp.set(c) }
 // configuration section. The redis driver draws its connection through the
 // application's shared redis resolution: an empty cache redis section
 // inherits the shared connection (top-level section), a non-empty one opens
-// a dedicated connection of its own. Construction cannot fail: the memory
-// backend needs nothing, the file backend creates its directory on first
-// write, and the redis client connects lazily on first use.
+// a dedicated connection of its own. A section the constructor rejects (an
+// unknown driver) is reported on stderr and degrades to the memory backend
+// so the application still starts.
 func newDefaultCache(cfg config.Cache, shared *component[redis.UniversalClient]) cache.Cache {
 	var client redis.UniversalClient
 	if cfg.Driver == "redis" {
 		client = redisClientFor(cfg.Redis, shared)
 	}
-	return cache.NewFromConfigWithRedis(cfg, client)
+	c, err := cache.New(cache.Config{
+		Driver:    cfg.Driver,
+		KeyPrefix: cfg.KeyPrefix,
+		TTL:       cfg.TTL,
+		Path:      cfg.Path,
+		Redis:     cache.RedisConfig(cfg.Redis),
+	}, cache.WithRedis(client))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "goyii: %v; falling back to the memory cache\n", err)
+		// The memory backend is the zero-value driver, so this fallback
+		// cannot fail; the configured lifetime is still honored.
+		fallback, _ := cache.New(cache.Config{TTL: cfg.TTL})
+		return fallback
+	}
+	return c
 }

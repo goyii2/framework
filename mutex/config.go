@@ -1,38 +1,58 @@
 package mutex
 
 import (
-	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/redis/go-redis/v9"
-
-	"github.com/goyii2/framework/config"
 )
 
-// NewFromConfig builds the mutex the configuration's mutex section selects:
-// driver "redis" keeps the locks in redis over client (the application core
-// passes the shared connection this way), anything else — including
-// "process" and the empty default — is the in-process driver. A driver the
-// section cannot name yields a mutex whose acquisitions fail with a
-// configuration error rather than a nil component, so the mistake surfaces
-// at first use instead of breaking application assembly.
-func NewFromConfig(cfg config.Mutex, client redis.UniversalClient) Mutex {
-	switch strings.ToLower(strings.TrimSpace(cfg.Driver)) {
-	case "", "process":
-		return NewProcess()
-	case "redis":
-		return NewRedis(client, "")
-	default:
-		return failingMutex{fmt.Errorf("mutex: unknown driver %q (want process or redis)", cfg.Driver)}
-	}
+// Config carries the mutex component values. The zero value selects the
+// in-process driver; the redis driver additionally requires a connection
+// injected with WithRedis.
+type Config struct {
+	Driver string `yaml:"driver"` // process | redis; empty = process
 }
 
-// failingMutex reports one fixed configuration error from every acquisition.
-type failingMutex struct{ err error }
+// Option customizes mutex construction; options carry cross-component
+// dependencies, values live in Config.
+type Option func(*options)
 
-func (f failingMutex) Lock(context.Context, string, time.Duration) (func(), error) { return nil, f.err }
-func (f failingMutex) TryLock(context.Context, string, time.Duration) (func(), error) {
-	return nil, f.err
+// options accumulates what the options set.
+type options struct {
+	redis redis.UniversalClient
+}
+
+// WithRedis hands the mutex the redis connection the redis driver locks
+// through — the application's shared connection, so every process locking
+// the same name on the same server coordinates through one key space. The
+// process driver (the default) ignores the client.
+func WithRedis(client redis.UniversalClient) Option {
+	return func(o *options) { o.redis = client }
+}
+
+// New builds the mutex Config selects: "process" (also the empty default)
+// locks inside one process, "redis" locks across processes over the injected
+// connection. The redis driver has no connection values of its own — a mutex
+// coordinates processes, so a private server nobody else locks on would be a
+// mistake — and a redis driver without a connection fails construction, as
+// does a driver New cannot name.
+func New(cfg Config, opts ...Option) (Mutex, error) {
+	var o options
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&o)
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.Driver)) {
+	case "", "process":
+		return NewProcess(), nil
+	case "redis":
+		if o.redis == nil {
+			return nil, fmt.Errorf("mutex: redis driver requires a redis connection (pass one with WithRedis)")
+		}
+		return NewRedis(o.redis, ""), nil
+	default:
+		return nil, fmt.Errorf("mutex: unknown driver %q (want process or redis)", cfg.Driver)
+	}
 }

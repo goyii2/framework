@@ -8,8 +8,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-
-	"github.com/goyii2/framework/config"
 )
 
 // memTarget is a custom in-memory Target used across the tests to observe
@@ -46,7 +44,7 @@ func (m *memTarget) find(message string) (Record, bool) {
 
 func TestLoggerRespectsLevelFloor(t *testing.T) {
 	mem := &memTarget{}
-	l := New(slog.LevelWarn, mem)
+	l := NewWithTargets(slog.LevelWarn, mem)
 
 	l.Debug("dbg")
 	l.Info("inf")
@@ -70,7 +68,7 @@ func TestLoggerRespectsLevelFloor(t *testing.T) {
 
 func TestLoggerDefaultCategory(t *testing.T) {
 	mem := &memTarget{}
-	l := New(slog.LevelDebug, mem)
+	l := NewWithTargets(slog.LevelDebug, mem)
 
 	l.Info("hello", "key", "value")
 
@@ -88,7 +86,7 @@ func TestLoggerDefaultCategory(t *testing.T) {
 
 func TestLoggerCategoryScope(t *testing.T) {
 	mem := &memTarget{}
-	l := New(slog.LevelDebug, mem)
+	l := NewWithTargets(slog.LevelDebug, mem)
 
 	db := l.Category("db")
 	db.Info("connecting")
@@ -115,7 +113,7 @@ func TestLoggerCategoryScope(t *testing.T) {
 
 func TestLoggerExplicitLevelAndCategory(t *testing.T) {
 	mem := &memTarget{}
-	l := New(slog.LevelDebug, mem)
+	l := NewWithTargets(slog.LevelDebug, mem)
 
 	l.Log(slog.LevelError, "web/session", "destroy failed", "id", "s1")
 
@@ -130,7 +128,7 @@ func TestLoggerExplicitLevelAndCategory(t *testing.T) {
 
 func TestLoggerOddArgsCollectedAsBadKey(t *testing.T) {
 	mem := &memTarget{}
-	l := New(slog.LevelDebug, mem)
+	l := NewWithTargets(slog.LevelDebug, mem)
 
 	l.Info("odd", "key", "value", 42)
 
@@ -147,7 +145,7 @@ func TestLoggerCustomTargetInjectionWithFilter(t *testing.T) {
 	all := &memTarget{}
 	dbOnly := &memTarget{}
 
-	base := New(slog.LevelDebug, all)
+	base := NewWithTargets(slog.LevelDebug, all)
 	l := base.WithTarget(dbOnly, Filter{Includes: []string{"db*"}})
 
 	l.Category("db.query").Info("from db")
@@ -179,7 +177,7 @@ func TestLoggerDeliversToConsoleAndFileTargets(t *testing.T) {
 	t.Cleanup(func() { _ = file.Close() })
 
 	mem := &memTarget{}
-	l := New(slog.LevelDebug, console, file, mem)
+	l := NewWithTargets(slog.LevelDebug, console, file, mem)
 
 	l.Category("web").Warn("multi-target", "n", 1)
 
@@ -202,7 +200,7 @@ func TestLoggerDeliversToConsoleAndFileTargets(t *testing.T) {
 
 func TestLoggerTargetWriteErrorIsContained(t *testing.T) {
 	all := &memTarget{}
-	l := New(slog.LevelDebug, &failTarget{}, all)
+	l := NewWithTargets(slog.LevelDebug, &failTarget{}, all)
 
 	l.Info("still delivered")
 
@@ -222,7 +220,7 @@ func TestLoggerCloseClosesTargets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFileTarget: %v", err)
 	}
-	l := New(slog.LevelDebug, file)
+	l := NewWithTargets(slog.LevelDebug, file)
 
 	if err := l.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
@@ -232,18 +230,18 @@ func TestLoggerCloseClosesTargets(t *testing.T) {
 	}
 }
 
-func TestNewFromConfigBuildsFilteredTargets(t *testing.T) {
+func TestNewBuildsFilteredTargets(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cfg.log")
-	cfg := config.Log{
+	cfg := Config{
 		Level: "debug",
-		Targets: []config.LogTarget{
+		Targets: []TargetConfig{
 			{Type: "console", MinLevel: "warn", Categories: []string{"web*"}, Except: []string{"web/noisy"}},
 			{Type: "file", Path: path, MinLevel: "debug"},
 		},
 	}
-	l, err := NewFromConfig(cfg)
+	l, err := New(cfg)
 	if err != nil {
-		t.Fatalf("NewFromConfig: %v", err)
+		t.Fatalf("New: %v", err)
 	}
 	t.Cleanup(func() { _ = l.Close() })
 
@@ -264,10 +262,27 @@ func TestNewFromConfigBuildsFilteredTargets(t *testing.T) {
 	}
 }
 
-func TestNewFromConfigDefaultsToConsole(t *testing.T) {
-	l, err := NewFromConfig(config.Log{Level: "warn"})
+// TestNewZeroConfigIsConsoleInfo verifies the zero Config constructs a
+// working logger: info level, one console target on stdout.
+func TestNewZeroConfigIsConsoleInfo(t *testing.T) {
+	l, err := New(Config{})
 	if err != nil {
-		t.Fatalf("NewFromConfig: %v", err)
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = l.Close() })
+
+	if l.Enabled(slog.LevelDebug) || !l.Enabled(slog.LevelInfo) {
+		t.Error("the zero config must log at info level")
+	}
+	if len(l.bindings) != 1 || l.bindings[0].target.Name() != "console" {
+		t.Errorf("the zero config must install one console target, got %+v", l.bindings)
+	}
+}
+
+func TestNewDefaultsToConsole(t *testing.T) {
+	l, err := New(Config{Level: "warn"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
 	}
 	t.Cleanup(func() { _ = l.Close() })
 
@@ -279,16 +294,16 @@ func TestNewFromConfigDefaultsToConsole(t *testing.T) {
 	}
 }
 
-func TestNewFromConfigRejectsUnknownTargetType(t *testing.T) {
-	_, err := NewFromConfig(config.Log{Targets: []config.LogTarget{{Type: "syslog"}}})
+func TestNewRejectsUnknownTargetType(t *testing.T) {
+	_, err := New(Config{Targets: []TargetConfig{{Type: "syslog"}}})
 	if err == nil || !strings.Contains(err.Error(), "unknown") {
 		t.Fatalf("unknown target type must error, got %v", err)
 	}
 }
 
-func TestNewFromConfigRejectsUnwritableFile(t *testing.T) {
+func TestNewRejectsUnwritableFile(t *testing.T) {
 	// A directory can never be opened as an append-mode log file.
-	_, err := NewFromConfig(config.Log{Targets: []config.LogTarget{{Type: "file", Path: t.TempDir()}}})
+	_, err := New(Config{Targets: []TargetConfig{{Type: "file", Path: t.TempDir()}}})
 	if err == nil {
 		t.Fatal("an unwritable file target must error")
 	}

@@ -11,13 +11,14 @@ import (
 	gomail "github.com/wneessen/go-mail"
 )
 
-// SMTPConfig carries the values of the smtp driver.
+// SMTPConfig carries the values of the smtp driver; it is also the smtp
+// section of the mail Config, so its yaml tags spell the section's keys.
 type SMTPConfig struct {
-	Host       string
-	Port       int    // 0 picks the default for the encryption: 587, or 465 for smtps
-	Username   string // empty disables authentication
-	Password   string
-	Encryption string // none | starttls | smtps (aliases tls/ssl); empty means starttls
+	Host       string `yaml:"host"`
+	Port       int    `yaml:"port"`     // 0 picks the default for the encryption: 587, or 465 for smtps
+	Username   string `yaml:"username"` // empty disables authentication
+	Password   string `yaml:"password"`
+	Encryption string `yaml:"encryption"` // none | starttls | smtps (aliases tls/ssl); empty means starttls
 }
 
 // Encryption names for the transport security strategies.

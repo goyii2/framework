@@ -52,7 +52,7 @@ func attrOf(rec log.Record, key string) (any, bool) {
 func newAdaptedLogger(t *testing.T, level slog.Level, slow time.Duration) (*GormLogger, *captureTarget) {
 	t.Helper()
 	capt := &captureTarget{}
-	l := log.New(level, capt)
+	l := log.NewWithTargets(level, capt)
 	return &GormLogger{get: func() *log.Logger { return l }, slow: slow}, capt
 }
 

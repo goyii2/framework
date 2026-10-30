@@ -28,7 +28,7 @@ func attrValue(rec Record, key string) (any, bool) {
 
 func TestProfileEmitsPairedRecords(t *testing.T) {
 	mem := &memTarget{}
-	l := New(slog.LevelDebug, mem)
+	l := NewWithTargets(slog.LevelDebug, mem)
 
 	p := l.BeginProfile("render posts")
 	p.End()
@@ -63,7 +63,7 @@ func TestProfileEmitsPairedRecords(t *testing.T) {
 
 func TestProfileRespectsCategoryFilters(t *testing.T) {
 	profilesOnly := &memTarget{}
-	l := New(slog.LevelDebug).WithTarget(profilesOnly, Filter{Includes: []string{ProfileCategory}})
+	l := NewWithTargets(slog.LevelDebug).WithTarget(profilesOnly, Filter{Includes: []string{ProfileCategory}})
 
 	l.Info("noise")
 	p := l.BeginProfile("kept")
@@ -77,7 +77,7 @@ func TestProfileRespectsCategoryFilters(t *testing.T) {
 
 func TestProfileSilentWhenLevelFiltersInfo(t *testing.T) {
 	mem := &memTarget{}
-	l := New(slog.LevelError, mem)
+	l := NewWithTargets(slog.LevelError, mem)
 
 	p := l.BeginProfile("dropped")
 	p.End()
@@ -89,7 +89,7 @@ func TestProfileSilentWhenLevelFiltersInfo(t *testing.T) {
 
 func TestProfileEndIsIdempotent(t *testing.T) {
 	mem := &memTarget{}
-	l := New(slog.LevelDebug, mem)
+	l := NewWithTargets(slog.LevelDebug, mem)
 
 	p := l.BeginProfile("once")
 	p.End()
@@ -115,7 +115,7 @@ func TestProfileConcurrentTiming(t *testing.T) {
 		t.Fatalf("NewFileTarget: %v", err)
 	}
 	t.Cleanup(func() { _ = target.Close() })
-	l := New(slog.LevelDebug, target)
+	l := NewWithTargets(slog.LevelDebug, target)
 
 	const goroutines, intervals = 32, 8
 	var wg sync.WaitGroup

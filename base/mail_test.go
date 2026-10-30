@@ -87,15 +87,20 @@ func TestApplicationSetMailerFake(t *testing.T) {
 	}
 }
 
-// TestApplicationMailerFromConfig checks the smtp driver wiring through the
-// component holder: a configuration error must surface at the first Send,
-// not at application assembly.
-func TestApplicationMailerFromConfig(t *testing.T) {
+// TestApplicationMailerSmtpWithoutHostFallsBackToLog checks the transition
+// through the component holder: an smtp section the constructor rejects
+// (here: no host) degrades to the log mailer with a warning, instead of a
+// mailer that fails on every Send.
+func TestApplicationMailerSmtpWithoutHostFallsBackToLog(t *testing.T) {
 	app := New(config.Config{Mail: config.Mail{Driver: "smtp"}})
+
+	if _, ok := app.Mailer().(*mail.LogMailer); !ok {
+		t.Fatalf("Mailer() through a rejected smtp section is %T, want the log-mailer fallback", app.Mailer())
+	}
 	err := app.Mailer().Send(context.Background(),
 		mail.NewMessage().SetFrom("ada@example.com").SetTo("g@example.com").SetTextBody("hi"))
-	if err == nil || !strings.Contains(err.Error(), "host is required") {
-		t.Fatalf("Send error = %v, want the smtp configuration error", err)
+	if err != nil {
+		t.Fatalf("Send through the fallback: %v", err)
 	}
 }
 

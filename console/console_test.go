@@ -366,7 +366,7 @@ func TestExecuteClosesLogTargets(t *testing.T) {
 		t.Fatalf("open file target: %v", err)
 	}
 	app := base.New(config.Default())
-	app.SetLog(log.New(slog.LevelInfo, target))
+	app.SetLog(log.NewWithTargets(slog.LevelInfo, target))
 
 	ran := false
 	c := New(app)
