@@ -29,16 +29,12 @@ type EmailJob struct {
 // Name is the registry key the worker resolves pushed messages by.
 func (j *EmailJob) Name() string { return "email" }
 
-// defaultFrom is the sender the demo messages carry; it matches the
-// project's mail.from value (assembly in main.go).
-const defaultFrom = "goyii basic <no-reply@goyii.example>"
-
 // Execute delivers the message through the application the worker context
-// carries.
+// carries. The message sets no sender, so the mail component fills in the
+// configured mail.from default.
 func (j *EmailJob) Execute(ctx context.Context) error {
 	app := base.FromContext(ctx)
 	msg := mail.NewMessage().
-		SetFrom(defaultFrom).
 		SetTo(j.To).
 		SetSubject(j.Subject).
 		SetTextBody(j.Body)

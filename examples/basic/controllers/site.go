@@ -13,19 +13,25 @@ import (
 
 	"github.com/goyii2/framework/db/ar"
 	"github.com/goyii2/framework/examples/basic/models"
+	"github.com/goyii2/framework/examples/basic/notifier"
 	"github.com/goyii2/framework/examples/basic/views"
 	"github.com/goyii2/framework/i18n"
-	"github.com/goyii2/framework/mail"
 	"github.com/goyii2/framework/url"
 	"github.com/goyii2/framework/web"
 )
 
 // SiteController carries the entry points around authentication. Its one
-// piece of middleware scopes the convention-resolved /site/index to safe
-// verbs — the VerbFilter demonstration: POST /site/index answers 405 with an
-// Allow header instead of running the action.
+// injected dependency, the notifier, is this project's own component: main
+// builds it from the custom email section and passes it in — constructor
+// injection, no registry. Its middleware scopes the convention-resolved
+// /site/index to safe verbs — the VerbFilter demonstration: POST /site/index
+// answers 405 with an Allow header instead of running the action.
 type SiteController struct {
 	web.Controller
+
+	// Notify delivers the transactional demonstration mail; nil only in
+	// tests that never touch it.
+	Notify *notifier.Notifier
 }
 
 func (site *SiteController) Middleware() []web.Middleware {
@@ -192,10 +198,11 @@ func (site *SiteController) ActionLoginForm(c *web.Context) error {
 	})
 }
 
-// ActionNotify demonstrates the mail component: it composes a message with
-// the chain builder and hands it to the application's mailer. The default
+// ActionNotify demonstrates the project's custom component: the notifier,
+// built in main from the custom email section, composes the message with its
+// configured sender and hands it to the application's mailer. The default
 // log driver records the complete message in the application log — the
-// development counterpart of an SMTP delivery.
+// development counterpart of a provider delivery.
 func (site *SiteController) ActionNotify(c *web.Context) error {
 	recipient := "guest@example.com"
 	if identity := c.User().Identity(); identity != nil {
@@ -203,15 +210,14 @@ func (site *SiteController) ActionNotify(c *web.Context) error {
 	}
 	subject := i18n.T(c.Context(), "app", "A test email from {app}",
 		map[string]any{"app": c.App().Name()})
-	body := i18n.T(c.Context(), "app", "This message was composed by the mail example of the basic application.", nil)
-	msg := mail.NewMessage().
-		SetFrom("goyii basic <no-reply@goyii.example>").
-		SetTo(recipient).
-		SetSubject(subject).
-		SetTextBody(body)
-	if err := c.App().Mailer().Send(c.Context(), msg); err != nil {
+	body := i18n.T(c.Context(), "app", "This message was composed by the notifier component of the basic application.", nil)
+	if err := site.Notify.Send(c.Context(), recipient, subject, body); err != nil {
 		return err
 	}
 	c.SetTitle(i18n.T(c.Context(), "app", "Mail sent", nil))
-	return c.Render("site/notify", views.NotifyData{Recipient: recipient, HomeURL: url.To("site/home", nil)})
+	return c.Render("site/notify", views.NotifyData{
+		Recipient: recipient,
+		Sender:    site.Notify.Sender(),
+		HomeURL:   url.To("site/home", nil),
+	})
 }

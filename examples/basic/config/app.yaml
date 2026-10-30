@@ -3,7 +3,10 @@
 #
 # Every value below can be overridden through the matching environment
 # variable (field path upper-cased): DB_DSN, WEB_LISTEN, CACHE_PATH,
-# SESSION_PATH, APP_DEBUG, ...
+# SESSION_PATH, APP_DEBUG, EMAIL_APIKEY, ...
+#
+# The active environment (GOYII_ENV, default dev) overlays this file with
+# web-<env>.yaml when that file exists — see web-dev.yaml.
 app:
   name: basic
   debug: true
@@ -47,6 +50,16 @@ mail:
   # to smtp for delivery (see docs/配置参考.md).
   driver: log
   from: "goyii basic <no-reply@goyii.example>"
+
+email:
+  # This project's fully custom section: the credentials of a transactional
+  # mail provider, consumed by the notifier component built in main.go. No
+  # framework package knows these fields. The dev overlay (web-dev.yaml)
+  # replaces the key; EMAIL_APIKEY overrides both. Values here are
+  # placeholders for the walkthrough — production feeds the key through the
+  # environment, never through a committed file.
+  apiKey: base-key-from-app-yaml
+  sender: "goyii basic <notifications@goyii.example>"
 
 log:
   level: debug

@@ -1,17 +1,19 @@
-// The basic example is the P0+P1+P2 walkthrough application: configuration
-// assembly, migrations, seeding, session login, a validated CRUD API with
-// access control, CSRF, negotiated errors, logging and caching — and the
-// browser face on top: templ pages with layout and widgets, RBAC menus,
-// translated interface and validation messages, a paginated sortable list,
-// detail and edit forms, automatic timestamps and the mailer, plus the P2
-// face (queue, page cache, debug panel, Vite frontend).
+// The basic example is the reference application for the framework's
+// configuration and assembly shape — and the P0+P1+P2 walkthrough on top:
+// migrations, seeding, session login, a validated CRUD API with access
+// control, CSRF, negotiated errors, logging and caching — plus the browser
+// face (templ pages with layout and widgets, RBAC menus, translated messages,
+// a paginated sortable list, detail and edit forms, automatic timestamps) and
+// the P2 face (queue, page cache, debug panel, Vite frontend).
 //
 // The layout follows the Yii2 mental model, one package per concern:
 //
+//	config/       this project's own configuration shape and yaml files
 //	controllers/  the web controllers (one file per controller)
 //	models/       the Active Record models
 //	views/        the templ pages, layout and view registration
 //	jobs/         the queue jobs
+//	notifier/     a project-owned custom component (constructor injection)
 //	commands/     the user-defined console commands (seed)
 //	migrations/   the versioned schema migrations
 //
@@ -37,16 +39,19 @@ import (
 
 	"github.com/goyii2/framework/base"
 	"github.com/goyii2/framework/cache"
-	"github.com/goyii2/framework/config"
+	// The framework's generic loader: fills whatever struct a project
+	// defines, from app.yaml + web-<env>.yaml + environment variables.
+	goyii "github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/console"
-	"github.com/goyii2/framework/db"
 	"github.com/goyii2/framework/db/ar"
 	"github.com/goyii2/framework/debug"
 	"github.com/goyii2/framework/examples/basic/commands"
+	"github.com/goyii2/framework/examples/basic/config"
 	"github.com/goyii2/framework/examples/basic/controllers"
 	"github.com/goyii2/framework/examples/basic/jobs"
 	"github.com/goyii2/framework/examples/basic/migrations"
 	"github.com/goyii2/framework/examples/basic/models"
+	"github.com/goyii2/framework/examples/basic/notifier"
 	"github.com/goyii2/framework/examples/basic/views"
 	"github.com/goyii2/framework/i18n"
 	"github.com/goyii2/framework/log"
@@ -68,30 +73,6 @@ import (
 //go:embed messages
 var messages embed.FS
 
-// Config is this project's own configuration: identity and server values of
-// its own plus the parameter bundles of the component packages it uses. The
-// framework's config.LoadAs fills it from config/app.yaml (+ the environment
-// overlay and environment variables); the assembly below turns its values
-// into components.
-type Config struct {
-	App struct {
-		Name  string `yaml:"name"`
-		Debug bool   `yaml:"debug"`
-	} `yaml:"app"`
-	Web struct {
-		Listen string `yaml:"listen"`
-	} `yaml:"web"`
-	DB      db.Config      `yaml:"db"`
-	Queue   queue.Config   `yaml:"queue"`
-	Cache   cache.Config   `yaml:"cache"`
-	Session session.Config `yaml:"session"`
-	I18n    struct {
-		Language string `yaml:"language"`
-	} `yaml:"i18n"`
-	Mail mail.Config `yaml:"mail"`
-	Log  log.Config  `yaml:"log"`
-}
-
 func main() {
 	// runtime/ holds the sqlite database, the log file, session records,
 	// cache entries and the debug panel's request records. SQLite refuses to
@@ -103,19 +84,24 @@ func main() {
 		}
 	}
 
-	cfg, err := config.LoadAs[Config]("config")
+	// The project's own configuration: config/ holds the struct and the yaml
+	// files. LoadAs runs the three machines — app.yaml, the web-<env>.yaml
+	// overlay (GOYII_ENV, dev by default), leaf-field environment overrides
+	// (DB_DSN, APP_DEBUG, EMAIL_APIKEY, ...) — into that struct.
+	cfg, err := goyii.LoadAs[config.Config]("config")
 	if err != nil {
 		fail(err)
 	}
 
 	// Assembly: every component is constructed eagerly from the project's
 	// configuration and installed on the application; construction errors
-	// end the process here, not somewhere inside a request.
+	// end the process here, not somewhere inside a request. Constructors
+	// validate only — no connection is dialed yet, so boot stays local.
 	logger, err := log.New(cfg.Log)
 	if err != nil {
 		fail(err)
 	}
-	app := base.New(base.WithApp(cfg.App.Name, config.Env(), cfg.App.Debug))
+	app := base.New(base.WithApp(cfg.App.Name, goyii.Env(), cfg.App.Debug))
 	app.SetLog(logger)
 	if err := app.ConnectDB(cfg.DB, cfg.Log.Gorm); err != nil {
 		fail(err)
@@ -141,7 +127,21 @@ func main() {
 	}
 	app.SetSession(sess)
 	base.SetDefault(app) // background code without a request context resolves this instance
-	app.SetI18n(i18n.NewMessageSource(messages))
+	app.SetI18n(i18n.NewMessageSource(messages, i18n.WithDefaultLanguage(cfg.I18n.Language)))
+
+	// The custom component of this project, built from the custom email
+	// section: the transactional notifier, consumed by the site controller
+	// (constructor injection below, the same shape as the auth manager). Its
+	// startup line is the observable outlet of that section — the key it
+	// prints has already been through the web-dev.yaml overlay, and the
+	// EMAIL_APIKEY environment variable wins over both. Real credentials
+	// never belong on a log; this one is a committed placeholder.
+	notify, err := notifier.New(cfg.Email, app.Mailer())
+	if err != nil {
+		fail(err)
+	}
+	app.Logger().Info("notifier: transactional email ready", "sender", notify.Sender(), "apiKey", cfg.Email.APIKey)
+
 	// The queue job registry is filled before any command runs: serve pushes
 	// onto it, seed plants the demo jobs, and the queue workers resolve the
 	// same names.
@@ -168,7 +168,7 @@ func main() {
 		fail(err)
 	}
 	handler.SetAuthManager(auth)
-	registerRoutes(handler, app, auth)
+	registerRoutes(handler, app, auth, notify)
 	views.Register(handler.Views())
 	url.SetDefault(handler.URLs()) // url.To resolves this handler's named routes
 
@@ -225,7 +225,7 @@ func distAssets(dir, prefix string) web.Middleware {
 // /admin module tree demos nesting: one module-level access rule guards
 // the whole subtree, the /admin/report submodule adds a second prefix
 // level with module-relative route names.
-func registerRoutes(h *web.Handler, app *base.Application, auth *rbac.DbManager) {
+func registerRoutes(h *web.Handler, app *base.Application, auth *rbac.DbManager, notify *notifier.Notifier) {
 	// Error responses negotiate JSON/HTML from the Accept header; write
 	// requests carry a JSON body (API) or a form-encoded one (browser
 	// pages), anything else answers 415.
@@ -243,7 +243,10 @@ func registerRoutes(h *web.Handler, app *base.Application, auth *rbac.DbManager)
 	// pages alike); JSON replies never render, so it stays dormant there.
 	h.Use(views.Layout())
 
-	site := &controllers.SiteController{}
+	// The site controller receives the project's own notifier here — the
+	// custom component rides along the same constructor injection the auth
+	// manager uses on the post controller.
+	site := &controllers.SiteController{Notify: notify}
 	post := &controllers.PostController{Auth: auth}
 
 	sc := h.Ctrl(site)

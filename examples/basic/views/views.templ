@@ -232,8 +232,11 @@ templ pageCachePage(d PageCacheData) {
 
 templ notifyPage(d NotifyData) {
 	<h1>{ i18n.T(ctx, "app", "Mail sent", nil) }</h1>
-	<p>{ i18n.T(ctx, "app", "The message was handed to the configured mailer. The log driver records it in the application log; set mail.driver to smtp in config/app.yaml for real delivery.", nil) }</p>
-	<p class="meta">{ d.Recipient }</p>
+	<p>{ i18n.T(ctx, "app", "The notifier — this project's own component, built from the custom email section — composed the message and handed it to the configured mailer. The log driver records it in the application log.", nil) }</p>
+	<p class="meta">
+		{ i18n.T(ctx, "app", "From {sender}", map[string]any{"sender": d.Sender}) }
+		{ i18n.T(ctx, "app", "To {recipient}", map[string]any{"recipient": d.Recipient}) }
+	</p>
 	<p><a class="button" href={ templ.URL(d.HomeURL) }>{ i18n.T(ctx, "app", "Home", nil) }</a></p>
 }
 

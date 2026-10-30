@@ -1,0 +1,14 @@
+# The dev overlay: loaded on top of app.yaml whenever GOYII_ENV selects dev
+# (the default), replacing only the fields it names — everything else keeps
+# its app.yaml value. Any other environment (GOYII_ENV=prod ...) reads
+# app.yaml alone unless a matching web-<env>.yaml sits next to it.
+#
+# This overlay carries the sandbox mail provider key of the development
+# environment. The boot log prints the key the notifier component resolved,
+# so the three layers of the loading machine are observable side by side:
+#
+#	app.yaml               base-key-from-app-yaml
+#	+ this overlay         dev-key-from-web-dev-overlay   <- active in dev
+#	+ EMAIL_APIKEY=...     the environment variable wins over both
+email:
+  apiKey: dev-key-from-web-dev-overlay

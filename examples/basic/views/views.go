@@ -100,9 +100,12 @@ type PostFormData struct {
 	CancelURL   string
 }
 
-// NotifyData drives the mailer result page.
+// NotifyData drives the notification result page: the recipient the message
+// went to and the sender the notifier composed it from (the custom email
+// section's value, visible next to the recipient).
 type NotifyData struct {
 	Recipient string
+	Sender    string
 	HomeURL   string
 }
 
