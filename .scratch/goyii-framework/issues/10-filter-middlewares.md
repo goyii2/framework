@@ -1,6 +1,6 @@
 # 10: Filter 族横切中间件
 
-**Status:** resolved
+Status: resolved
 
 **What to build:** 六件横切中间件（VerbFilter/Cors/ContentNegotiator/Csrf/RateLimiter/HttpCache，即 Yii2 Filter 族的 Go 落地）+ Controller 级 `Middleware()` 挂接机制 + 应用级全局链。Csrf 对齐 Yii2 默认：会话表单开启、纯 API 应用可全局关闭。
 

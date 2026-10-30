@@ -1,6 +1,6 @@
 # 19: DataProvider
 
-**Status:** resolved
+Status: resolved
 
 **What to build:** 数据提供者：ActiveDataProvider（包装 AR 查询自动应用分页排序，仅取当页数据）与 ArrayDataProvider（内存切片）；查询参数沿用 Yii2 惯例 `page`/`per-page`/`sort=-created_at,id`；响应含 items + 分页元信息（totalCount/pageCount/当前页），供 API 与 LinkPager（16）共用。
 

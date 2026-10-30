@@ -1,6 +1,6 @@
 # 17: RBAC DbManager
 
-**Status:** resolved
+Status: resolved
 
 **What to build:** RBAC（ADR-0003）：AuthManager 接口 + 自建 DbManager——四表（auth_item/auth_item_child/auth_rule 仅存名/auth_assignment，GORM 访问）、item 图内存缓存与失效、规则只在代码定义（启动注册表与库内名字对齐）、`auth.Can/Assign/Revoke` 与 `user.Can` 联动；AccessControl 从 11 的角色回调切换到 AuthManager 后端（接口不变）。
 

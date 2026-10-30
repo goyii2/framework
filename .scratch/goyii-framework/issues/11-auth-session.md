@@ -1,6 +1,6 @@
 # 11: 认证与授权（P0 形态）
 
-**Status:** resolved
+Status: resolved
 
 **What to build:** User/Identity 认证与会话：Session（file/redis 后端）+ Cookie 管理、Identity 接口、HttpBasic/HttpBearer 认证中间件、会话登录/登出；AccessControl 以角色回调判定授权（P0 形态，P1 由 17 切换 AuthManager 后端，接口不变）。
 

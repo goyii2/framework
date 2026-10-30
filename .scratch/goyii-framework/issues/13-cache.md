@@ -1,6 +1,6 @@
 # 13: cache 组件
 
-**Status:** resolved
+Status: resolved
 
 **What to build:** 缓存组件：Cache 接口 + memory/file/redis 三实现 + 依赖失效（Dependency：依赖值变化/时间条件触发失效）；TTL 与并发安全。
 

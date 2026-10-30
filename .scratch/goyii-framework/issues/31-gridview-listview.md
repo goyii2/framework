@@ -1,6 +1,6 @@
 # 31: GridView/ListView
 
-**Status:** resolved
+Status: resolved
 
 **What to build:** 列表渲染大件：GridView（表格 + 列 DSL + 排序链接 + 过滤行）与 ListView（item 模板 + Summary + 分页）。输入是 action 里 `Prepare()` 好的 dataprovider.Result——纯渲染、不自行取数；过滤行只负责渲染 GET 表单与当前值回显，查询组装显式归 action（读 query 自行 Where，不引入 SearchModel 概念）。
 

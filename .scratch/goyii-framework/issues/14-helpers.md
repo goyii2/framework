@@ -1,6 +1,6 @@
 # 14: helpers 包
 
-**Status:** resolved
+Status: resolved
 
 **What to build:** 惯用帮助函数包：Array/Str/File/Json/Url/Html 的 Yii2 高频能力对应物（数组取值/合并/多维查询、字符串转写、文件查找/复制、JSON 安全编码、URL 与 HTML 生成），命名遵循 Go 惯用法而非 PHP 下划线风格。
 

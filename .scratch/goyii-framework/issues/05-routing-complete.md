@@ -1,6 +1,6 @@
 # 05: 路由完整化
 
-**Status:** resolved
+Status: resolved
 
 **What to build:** 完整路由能力（ADR-0002）：基于标准库 ServeMux 的显式绑定，`{id:[0-9]+}` 参数语法、`.Name()` 可选命名、`url.To(name, url.P{...})` 反向生成（命名表 -> 约定拼装兜底）、`/{controller}/{action}` 约定回退（默认开、可关、显式路由优先）、Module 分区前缀挂载。
 

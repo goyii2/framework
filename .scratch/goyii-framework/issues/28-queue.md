@@ -1,6 +1,6 @@
 # 28: queue
 
-**Status:** resolved
+Status: resolved
 
 **What to build:** 异步队列端到端：定义 Job（`Name()` + `Execute(ctx)`，应用级注册表）→ Push（JSON 序列化载荷；options：Delay/Priority/Attempts/TTR/Backoff，默认 Attempts=1、TTR=5m、退避 `2^attempt` 秒封顶 15m）→ worker 子命令消费（listen 常驻 / run 单轮 / retry 重推 failed）。驱动 sync/db/redis（file 不做，db+SQLite 覆盖零依赖）；db 驱动自带建表迁移；reserved 超 TTR 自动回炉；重试耗尽置 failed 保留。push/exec 前后五事件走 base 事件调度。Application 懒初始化组件 + config `Queue{Driver, TableName, PollIntervalMs}` 段。
 

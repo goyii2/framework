@@ -1,6 +1,6 @@
 # 24: 示例文章列表搜索
 
-**Status:** resolved
+Status: resolved
 
 **What to build:** examples/basic 的文章列表页顶部加搜索框（GET 表单），查询参数 `q` 对文章标题与正文做包含匹配（不分词，LIKE 模式且转义 `%`/`_` 输入）；分页与列头排序链接保留 `q`；命中为空时列表区显示友好提示；`p1-check.sh` 冒烟补搜索断言（命中若干篇 + 未命中空集 + q 与分页共存）。
 
