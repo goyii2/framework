@@ -17,6 +17,7 @@ import (
 
 	"github.com/goyii2/framework/base"
 	"github.com/goyii2/framework/examples/advanced/backend/controllers"
+	"github.com/goyii2/framework/examples/advanced/backend/system"
 	"github.com/goyii2/framework/examples/advanced/backend/views"
 	"github.com/goyii2/framework/web"
 )
@@ -91,6 +92,15 @@ func Register(h *web.Handler, app *base.Application, auth web.AccessChecker) err
 	routes.Get("/posts/{id:[0-9]+}/edit", post.ActionEdit).Name("post/edit")
 	routes.Post("/posts/{id:[0-9]+}", post.ActionSave).Name("post/save")
 	routes.Post("/posts/{id:[0-9]+}/delete", post.ActionDestroy).Name("post/delete")
+
+	// The system submodule nests below the backend module: /backend/system
+	// extends the prefix by exactly one segment, and its user management
+	// serves through the convention fallback alone — the guard chain above
+	// wraps the submodule's routes like every other path below /backend,
+	// outermost, exactly as it does for the module's own.
+	if err := system.Register(mod); err != nil {
+		return err
+	}
 
 	// The bare prefix is not mountable through the module registrar (every
 	// module route joins below the prefix), so it answers with a canonical

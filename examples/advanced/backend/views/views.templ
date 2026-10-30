@@ -14,6 +14,7 @@ type shellData struct {
 	AppName      string
 	DashboardURL string
 	PostsURL     string
+	SystemURL    string
 	HomeURL      string
 }
 
@@ -51,6 +52,10 @@ templ shell(nav shellData, title string, content templ.Component) {
 				textarea.form-control { max-width: 44rem; min-height: 10rem; }
 				div.help-block { color: #f87171; margin-top: 0.25rem; }
 				.meta { color: #94a3b8; }
+				ul.pagination { display: flex; gap: 0.3rem; list-style: none; padding: 0; margin-top: 1.2rem; }
+				ul.pagination li a, ul.pagination li span { display: block; padding: 0.25rem 0.6rem; border: 1px solid #374151; border-radius: 4px; }
+				ul.pagination li.active a { background: #1d4ed8; color: #ffffff; }
+				ul.pagination li.disabled span { color: #64748b; }
 			</style>
 		</head>
 		<body>
@@ -59,6 +64,7 @@ templ shell(nav shellData, title string, content templ.Component) {
 				<nav>
 					<a href={ templ.URL(nav.DashboardURL) } class={ templ.KV("active", navActive(ctx, nav.DashboardURL)) }>Dashboard</a>
 					<a href={ templ.URL(nav.PostsURL) } class={ templ.KV("active", navActive(ctx, nav.PostsURL)) }>Posts</a>
+					<a href={ templ.URL(nav.SystemURL) } class={ templ.KV("active", navActive(ctx, nav.SystemURL)) }>System</a>
 					<a href={ templ.URL(nav.HomeURL) }>View site</a>
 				</nav>
 				<p class="side-note">backend partition — module /backend, guarded by the admin role</p>
@@ -136,4 +142,37 @@ templ postFormPage(d PostFormData) {
 	<p style="margin-top: 0.8rem;">
 		<a href={ templ.URL(d.CancelURL) }>Cancel</a>
 	</p>
+}
+
+// systemUserPage is the nested system submodule's account listing: the rows
+// the DataProvider fetched for the current page, the totals line and the
+// LinkPager bar. The account row shows login names only — password hashes
+// never reach a page.
+templ systemUserPage(d SystemUserData) {
+	<h1>Users</h1>
+	<p class="meta">
+		{ d.TotalCount } accounts · page { d.Page } of { d.PageCount }
+		— module /backend/system, convention-routed
+	</p>
+	if len(d.Rows) == 0 {
+		<p class="meta">No accounts yet.</p>
+	} else {
+		<table>
+			<thead>
+				<tr>
+					<th>ID</th>
+					<th>Username</th>
+				</tr>
+			</thead>
+			<tbody>
+				for _, row := range d.Rows {
+					<tr>
+						<td>{ row.ID }</td>
+						<td>{ row.Username }</td>
+					</tr>
+				}
+			</tbody>
+		</table>
+		@d.Pager
+	}
 }

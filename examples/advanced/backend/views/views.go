@@ -54,6 +54,27 @@ type PostFormData struct {
 	CancelURL string
 }
 
+// SystemUserData drives the nested system submodule's account listing: the
+// current page's rows plus the paging metadata the totals line and the
+// LinkPager bar render. The submodule's controller owns the fetching; this
+// package only shapes what its page shows.
+type SystemUserData struct {
+	Rows  []SystemUserRow
+	Pager templ.Component
+	// TotalCount, Page and PageCount are the provider's effective values —
+	// the requested page already clamped into range.
+	TotalCount int
+	Page       int
+	PageCount  int
+}
+
+// SystemUserRow is one row of the account listing: the login name and its id.
+// The password hash is deliberately absent — it never reaches a page.
+type SystemUserRow struct {
+	ID       string
+	Username string
+}
+
 // Layout builds the backend's dark frame around every page of the module:
 // a dark sidebar with the brand and the module's navigation beside the
 // content area — the visual counterpart of the frontend's light shell, so
@@ -66,7 +87,11 @@ func Layout(appName string) view.Layout {
 			AppName:      appName,
 			DashboardURL: url.To("backend/dashboard", nil),
 			PostsURL:     url.To("backend/post/index", nil),
-			HomeURL:      url.To("site/index", nil),
+			// The system entry points at the submodule's conventional route:
+			// no registered name exists for it, so the address assembles
+			// through the convention fallback of reverse generation.
+			SystemURL: url.To("backend/system/user/list", nil),
+			HomeURL:   url.To("site/index", nil),
 		}, p.Title, p.Content)
 	}
 }
@@ -87,4 +112,5 @@ func Register(r *view.Registry) {
 	r.Register("backend/dashboard", view.Typed(dashboardPage))
 	r.Register("backend/post/index", view.Typed(postIndexPage))
 	r.Register("backend/post/form", view.Typed(postFormPage))
+	r.Register("backend/system/user", view.Typed(systemUserPage))
 }

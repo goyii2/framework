@@ -1,6 +1,6 @@
 // Package controllers holds the backend partition's controllers — the
-// pages of the /backend module. The system (user management) submodule
-// joins in a later slice.
+// pages of the /backend module. The nested system submodule (user
+// management) lives in its own package below backend/system.
 package controllers
 
 import (
