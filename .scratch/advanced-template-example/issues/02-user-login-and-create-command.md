@@ -1,6 +1,6 @@
 # 02: 用户登录与 user/create 命令
 
-Status: ready-for-agent
+Status: claimed
 Blocked by: 01（骨架与前台首页）
 
 **What to build:** common 分区的 User 模型（ActiveRecord + 验证 + identity 查找）落地，`user/create` 自定义命令（对应 Yii2 高级模板同名命令）创建用户，前台登录/登出表单与会话状态。演示：CLI 建用户 → 前台表单登录 → 导航显示已登录、可登出；错误凭据回显错误。
