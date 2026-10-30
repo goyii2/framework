@@ -1,6 +1,6 @@
 # 06: 文档与决策记录
 
-Status: ready-for-agent
+Status: claimed
 Blocked by: 05
 
 **What to build:** 按 spec 第 6 节产出文档：ADR 0002（project-owned-config-and-code-wiring，部分取代 0001——强类型 Application 保留；记录配置所有权反转、统一初始化五规则、急切装配语义、config 纯叶子工具包的取舍及否决项）；docs/配置参考.md 重写为 LoadAs + overlay + env 覆盖 + 组件参数包指南；docs/组件-base与config.md 同步访问器 / 装配 / 默认清单。文档内容与 05 落地后的真实 API 一致。
