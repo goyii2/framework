@@ -12,6 +12,14 @@
 //     App.Debug -> APP_DEBUG, Cache.Redis.Addr -> CACHE_REDIS_ADDR,
 //     Email.APIKey -> EMAIL_APIKEY).
 //
+// File values themselves support compose-style interpolation: before parsing,
+// ${VAR} placeholders in both files expand from the process environment —
+// ${DB_USER} splices into a DSN, ${VAR:-fallback} supplies a default for unset
+// variables, ${VAR:?message} fails the load when a value is mandatory, and a
+// variable that is unset without a default expands to the empty string.
+// Substitution shapes file values only: whole-field overrides (machine 3)
+// still win over whatever the files said.
+//
 // The loader fills no defaults — zero values stay zero and every component
 // package defaults inside its own constructor. A project that prefers a
 // different loader (viper, koanf, plain flags) skips this package entirely;
@@ -25,10 +33,12 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/a8m/envsubst"
 	"github.com/goccy/go-yaml"
 )
 
@@ -46,10 +56,11 @@ func Env() string {
 
 // LoadAs loads the configuration of type T from dir: app.yaml first, then the
 // web-<env>.yaml overlay for the active environment (Env), then environment
-// variable overrides. At least one of the two files must exist. T must be a
-// struct; every other shape is rejected. No defaults are filled — components
-// default in their own constructors, so a project's zero values reach them
-// unchanged.
+// variable overrides. ${VAR} placeholders in file values expand from the
+// process environment before parsing (see the package comment for the exact
+// forms). At least one of the two files must exist. T must be a struct; every
+// other shape is rejected. No defaults are filled — components default in
+// their own constructors, so a project's zero values reach them unchanged.
 func LoadAs[T any](dir string) (T, error) {
 	var cfg T
 	v := reflect.ValueOf(&cfg).Elem()
@@ -65,6 +76,10 @@ func LoadAs[T any](dir string) (T, error) {
 			}
 			return cfg, fmt.Errorf("config: read %s: %w", name, err)
 		}
+		data, err = expandEnv(data, name)
+		if err != nil {
+			return cfg, err
+		}
 		if err := yaml.Unmarshal(data, &cfg); err != nil {
 			return cfg, fmt.Errorf("config: parse %s: %w", name, err)
 		}
@@ -77,6 +92,34 @@ func LoadAs[T any](dir string) (T, error) {
 		return cfg, err
 	}
 	return cfg, nil
+}
+
+// requiredVar matches ${VAR:?message} / ${VAR?message} placeholders, whose
+// POSIX meaning is "unset (or empty) -> fail". The underlying expander does
+// not enforce these forms on its own — it substitutes the message text — so
+// the loader checks the named variables up front and fails the load instead.
+var requiredVar = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*):?\?([^}]*)\}`)
+
+// expandEnv substitutes ${VAR} placeholders in raw file bytes with process
+// environment values, compose-style: a variable that is unset and carries no
+// default expands to the empty string, ${VAR:-fallback} supplies the default,
+// ${VAR:?message} fails the load when the variable is unset or empty. name is
+// the file being expanded, for error context.
+func expandEnv(raw []byte, name string) ([]byte, error) {
+	for _, m := range requiredVar.FindAllStringSubmatch(string(raw), -1) {
+		if v, ok := os.LookupEnv(m[1]); !ok || v == "" {
+			detail := strings.TrimSpace(m[2])
+			if detail != "" {
+				detail = ": " + detail
+			}
+			return nil, fmt.Errorf("config: expand %s: required variable %s is not set%s", name, m[1], detail)
+		}
+	}
+	expanded, err := envsubst.Bytes(raw)
+	if err != nil {
+		return nil, fmt.Errorf("config: expand %s: %w", name, err)
+	}
+	return expanded, nil
 }
 
 // walkOverrides visits every exported leaf field of v and, when its

@@ -225,3 +225,108 @@ func TestLoadAsRejectsNonStructTarget(t *testing.T) {
 		t.Fatal("LoadAs into a non-struct type must fail")
 	}
 }
+
+func TestLoadAsExpandsEnvPlaceholders(t *testing.T) {
+	t.Setenv(config.EnvVarName, "dev")
+	t.Setenv("GOTEST_DSN_USER", "alice")
+	t.Setenv("GOTEST_LEVEL", "from-overlay")
+	dir := t.TempDir()
+	appYAML := `
+db:
+  dsn: "${GOTEST_DSN_USER}:secret@tcp(db.internal:3306)/app"
+session:
+  name: "${GOTEST_UNSET_SESS_NAME:-fallback-sid}"
+  backend: "${GOTEST_UNSET_BACKEND}"
+log:
+  level: "$5 stays literal"
+`
+	overlayYAML := `
+log:
+  level: "${GOTEST_LEVEL}"
+`
+	if err := os.WriteFile(filepath.Join(dir, "app.yaml"), []byte(appYAML), 0o644); err != nil {
+		t.Fatalf("writing app.yaml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "web-dev.yaml"), []byte(overlayYAML), 0o644); err != nil {
+		t.Fatalf("writing web-dev.yaml: %v", err)
+	}
+
+	cfg, err := config.LoadAs[projectConfig](dir)
+	if err != nil {
+		t.Fatalf("LoadAs: %v", err)
+	}
+	if cfg.DB.DSN != "alice:secret@tcp(db.internal:3306)/app" {
+		t.Errorf("DB.DSN = %q, want interpolated value", cfg.DB.DSN)
+	}
+	if cfg.Session.Name != "fallback-sid" {
+		t.Errorf("Session.Name = %q, want the :- default for an unset variable", cfg.Session.Name)
+	}
+	if cfg.Session.Backend != "" {
+		t.Errorf("Session.Backend = %q, want the empty string for an unset variable without default", cfg.Session.Backend)
+	}
+	if cfg.Log.Level != "from-overlay" {
+		t.Errorf("Log.Level = %q, want the overlay file's interpolated value", cfg.Log.Level)
+	}
+}
+
+func TestLoadAsRequiredPlaceholderFails(t *testing.T) {
+	t.Setenv(config.EnvVarName, "")
+	dir := t.TempDir()
+	appYAML := `
+db:
+  dsn: "${GOTEST_ABSENT_REQUIRED:?db dsn is mandatory}"
+`
+	if err := os.WriteFile(filepath.Join(dir, "app.yaml"), []byte(appYAML), 0o644); err != nil {
+		t.Fatalf("writing app.yaml: %v", err)
+	}
+
+	_, err := config.LoadAs[projectConfig](dir)
+	if err == nil {
+		t.Fatal("a :? placeholder on an unset variable must fail the load")
+	}
+	if !strings.Contains(err.Error(), "app.yaml") || !strings.Contains(err.Error(), "GOTEST_ABSENT_REQUIRED") {
+		t.Errorf("error %q must name the file and the offending variable", err)
+	}
+
+	// A variable that is set but empty fails the same way.
+	emptyDir := t.TempDir()
+	t.Setenv("GOTEST_EMPTY_REQUIRED", "")
+	if err := os.WriteFile(filepath.Join(emptyDir, "app.yaml"), []byte(appYAML), 0o644); err != nil {
+		t.Fatalf("writing app.yaml: %v", err)
+	}
+	if _, err := config.LoadAs[projectConfig](emptyDir); err == nil {
+		t.Fatal("a :? placeholder on a set-but-empty variable must fail the load")
+	}
+
+	// Set to a real value, the same placeholder loads normally.
+	t.Setenv("GOTEST_ABSENT_REQUIRED", "real-dsn")
+	cfg, err := config.LoadAs[projectConfig](dir)
+	if err != nil {
+		t.Fatalf("LoadAs with the required variable set: %v", err)
+	}
+	if cfg.DB.DSN != "real-dsn" {
+		t.Errorf("DB.DSN = %q, want the variable's value", cfg.DB.DSN)
+	}
+}
+
+func TestLoadAsEnvOverrideBeatsInterpolatedFileValue(t *testing.T) {
+	t.Setenv(config.EnvVarName, "")
+	t.Setenv("GOTEST_DSN_USER", "alice")
+	t.Setenv("DB_DSN", "whole-field-wins")
+	dir := t.TempDir()
+	appYAML := `
+db:
+  dsn: "${GOTEST_DSN_USER}:secret@tcp(db.internal:3306)/app"
+`
+	if err := os.WriteFile(filepath.Join(dir, "app.yaml"), []byte(appYAML), 0o644); err != nil {
+		t.Fatalf("writing app.yaml: %v", err)
+	}
+
+	cfg, err := config.LoadAs[projectConfig](dir)
+	if err != nil {
+		t.Fatalf("LoadAs: %v", err)
+	}
+	if cfg.DB.DSN != "whole-field-wins" {
+		t.Errorf("DB.DSN = %q, want the whole-field env override over the interpolated file value", cfg.DB.DSN)
+	}
+}
