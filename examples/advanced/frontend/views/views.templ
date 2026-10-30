@@ -6,13 +6,16 @@ package views
 
 // shellData is the chrome of every framed page, assembled at render time
 // from the request's context. User is empty for guests, so the session area
-// flips between the login link and the name + logout form.
+// flips between the login link and the name + logout form; Path drives the
+// navigation's active marker.
 type shellData struct {
 	AppName   string
 	User      string
 	CSRF      string
 	LoginURL  string
 	LogoutURL string
+	PostsURL  string
+	Path      string
 }
 
 templ shell(nav shellData, title string, content templ.Component) {
@@ -37,6 +40,11 @@ templ shell(nav shellData, title string, content templ.Component) {
 				.session form button { padding: 0.15rem 0.6rem; font: inherit; cursor: pointer; }
 				main { max-width: 60rem; margin: 1.5rem auto; padding: 0 1rem; }
 				footer { text-align: center; color: #94a3b8; padding: 1rem; font-size: 0.85rem; }
+				.meta { color: #64748b; }
+				article { margin-bottom: 1.6rem; padding-bottom: 1.2rem; border-bottom: 1px solid #e2e8f0; }
+				article:last-of-type { border-bottom: none; }
+				article h2 { margin-bottom: 0.2rem; }
+				.post-body { white-space: pre-wrap; }
 				.status { display: inline-block; margin: 0.15rem 0.2rem; padding: 0.1rem 0.6rem; border-radius: 999px; background: #e0f2fe; color: #075985; font-size: 0.85rem; }
 				.error { color: #b91c1c; }
 				form label { display: block; margin: 0.8rem 0; font-weight: 600; }
@@ -49,7 +57,8 @@ templ shell(nav shellData, title string, content templ.Component) {
 			<header>
 				<span class="brand">{ nav.AppName }</span>
 				<nav>
-					<a href="/" class="active">Home</a>
+					<a href="/" class={ templ.KV("active", nav.Path == "/") }>Home</a>
+					<a href={ templ.URL(nav.PostsURL) } class={ templ.KV("active", nav.Path == nav.PostsURL) }>Posts</a>
 				</nav>
 				<div class="session">
 					if nav.User != "" {
@@ -123,6 +132,32 @@ templ loginPage(d LoginData) {
 		</label>
 		<button type="submit">Sign in</button>
 	</form>
+}
+
+// postsPage is the public listing: one card per published post, the title
+// linking to the detail page.
+templ postsPage(d PostListData) {
+	<h1>Posts</h1>
+	if len(d.Posts) == 0 {
+		<p>Nothing has been published yet — content lands here through the backend's Posts page.</p>
+	} else {
+		for _, card := range d.Posts {
+			<article>
+				<h2><a href={ templ.URL(card.ViewURL) }>{ card.Title }</a></h2>
+				<p class="meta">by { card.Author } · { card.Created }</p>
+				<p>{ card.Excerpt }</p>
+			</article>
+		}
+	}
+}
+
+// postViewPage is the public detail page: byline, body and the way back to
+// the listing.
+templ postViewPage(d PostShowData) {
+	<h1>{ d.Title }</h1>
+	<p class="meta">by { d.Author } · { d.Created }</p>
+	<div class="post-body">{ d.Body }</div>
+	<p><a href={ templ.URL(d.BackURL) }>Back to posts</a></p>
 }
 
 // errorPageData is the unified error payload reshaped for the template; the

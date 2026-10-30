@@ -1,8 +1,8 @@
 // Package models holds the Active Record models of the common partition —
 // the records every application of the advanced template shares, the
 // counterpart of the Yii2 template's common/models. The user model joins the
-// user table the common migrations create; the post model follows in its own
-// slice.
+// user table the common migrations create; the post model joins the shared
+// content table beside it.
 package models
 
 import (

@@ -1,6 +1,6 @@
-// SiteController carries the frontend's public pages: the home page and the
-// session entry points around authentication (the login form, the login
-// submission, logout). The post list and detail join in later slices.
+// SiteController carries the frontend's session entry points around
+// authentication: the home page, the login form, the login submission and
+// logout. The public content pages live on PostController beside it.
 package controllers
 
 import (

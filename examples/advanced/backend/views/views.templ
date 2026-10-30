@@ -1,16 +1,20 @@
 // The templ components of the backend partition: the dark frame the
-// module's Layout mounts and the dashboard page. Dark is the point — the
-// backend must be told apart from the frontend's light shell at a glance.
-// (The templ package needs no import here — the generator adds it for
-// every template that references it.)
+// module's Layout mounts, the dashboard page and the post management pages
+// (listing, compose/edit form). Dark is the point — the backend must be
+// told apart from the frontend's light shell at a glance. (The templ
+// package needs no import here — the generator adds it for every template
+// that references it.)
 package views
 
 // shellData is the chrome of the backend frame. The frame carries no
 // request state of its own (the identity-dependent bits render inside the
-// pages), so the brand name is the only moving part, bound when the
-// partition assembles.
+// pages), so the brand name and the navigation's addresses — resolved by
+// route name when the partition assembles — are the moving parts.
 type shellData struct {
-	AppName string
+	AppName      string
+	DashboardURL string
+	PostsURL     string
+	HomeURL      string
 }
 
 templ shell(nav shellData, title string, content templ.Component) {
@@ -32,15 +36,30 @@ templ shell(nav shellData, title string, content templ.Component) {
 				.side-note { margin-top: auto; font-size: 0.8rem; color: #64748b; padding-top: 1.5rem; }
 				main { flex: 1; padding: 1.5rem 2rem; }
 				main h1 { color: #f8fafc; }
+				main h1 + p.actions { margin-top: -0.6rem; }
 				footer { color: #64748b; padding-top: 1.5rem; font-size: 0.85rem; }
+				table { border-collapse: collapse; width: 100%; margin-top: 0.8rem; }
+				th, td { border: 1px solid #1f2937; padding: 0.45rem 0.6rem; text-align: left; }
+				th { background: #0b1220; color: #cbd5e1; }
+				td form { display: inline; }
+				td form button { padding: 0.15rem 0.6rem; font: inherit; cursor: pointer; background: none; border: 1px solid #374151; color: #f87171; border-radius: 0.25rem; }
+				button, .button { padding: 0.3rem 0.9rem; font: inherit; cursor: pointer; }
+				.button { display: inline-block; background: #1d4ed8; color: #ffffff !important; text-decoration: none; border: none; border-radius: 0.25rem; }
+				div.form-group { margin: 0.9rem 0; }
+				div.form-group label { display: block; margin-bottom: 0.25rem; color: #cbd5e1; }
+				.form-control { display: block; width: 100%; max-width: 34rem; padding: 0.35rem; font: inherit; box-sizing: border-box; background: #0b1220; color: #e5e7eb; border: 1px solid #334155; border-radius: 0.25rem; }
+				textarea.form-control { max-width: 44rem; min-height: 10rem; }
+				div.help-block { color: #f87171; margin-top: 0.25rem; }
+				.meta { color: #94a3b8; }
 			</style>
 		</head>
 		<body>
 			<aside>
 				<span class="brand">{ nav.AppName } · backend</span>
 				<nav>
-					<a href="/backend/" class="active">Dashboard</a>
-					<a href="/">View site</a>
+					<a href={ templ.URL(nav.DashboardURL) } class={ templ.KV("active", navActive(ctx, nav.DashboardURL)) }>Dashboard</a>
+					<a href={ templ.URL(nav.PostsURL) } class={ templ.KV("active", navActive(ctx, nav.PostsURL)) }>Posts</a>
+					<a href={ templ.URL(nav.HomeURL) }>View site</a>
 				</nav>
 				<p class="side-note">backend partition — module /backend, guarded by the admin role</p>
 			</aside>
@@ -59,5 +78,62 @@ templ dashboardPage(d DashboardData) {
 		This is the backend application of the advanced template: one /backend module behind a
 		module-wide access rule (unauthenticated visitors are pointed at the login page, accounts
 		without the admin role are refused), framed by this dark layout.
+	</p>
+}
+
+// postIndexPage is the management listing: every post (drafts included),
+// each row with its actions. The delete button posts a small form so the
+// CSRF token rides along; the title links to the edit form.
+templ postIndexPage(d PostIndexData) {
+	<h1>Posts</h1>
+	<p class="actions">
+		<a class="button" href={ templ.URL(d.CreateURL) }>New post</a>
+	</p>
+	if len(d.Rows) == 0 {
+		<p class="meta">No posts yet — create the first one.</p>
+	} else {
+		<table>
+			<thead>
+				<tr>
+					<th>ID</th>
+					<th>Title</th>
+					<th>Status</th>
+					<th>Author</th>
+					<th>Updated</th>
+					<th>Actions</th>
+				</tr>
+			</thead>
+			<tbody>
+				for _, row := range d.Rows {
+					<tr>
+						<td>{ row.ID }</td>
+						<td><a href={ templ.URL(row.EditURL) }>{ row.Title }</a></td>
+						<td>{ row.Status }</td>
+						<td>{ row.Author }</td>
+						<td>{ row.Updated }</td>
+						<td>
+							if row.ViewURL != "" {
+								<a href={ templ.URL(row.ViewURL) }>View</a>
+							}
+							<a href={ templ.URL(row.EditURL) }>Edit</a>
+							<form method="post" action={ templ.URL(row.DeleteURL) }>
+								<input type="hidden" name="_csrf" value={ d.CSRF }/>
+								<button type="submit">Delete</button>
+							</form>
+						</td>
+					</tr>
+				}
+			</tbody>
+		</table>
+	}
+}
+
+// postFormPage frames the ActiveForm the controller rendered — on a 422 the
+// widget already carries the messages and the refilled values.
+templ postFormPage(d PostFormData) {
+	<h1>{ d.Heading }</h1>
+	@d.Form
+	<p style="margin-top: 0.8rem;">
+		<a href={ templ.URL(d.CancelURL) }>Cancel</a>
 	</p>
 }

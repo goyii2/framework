@@ -82,11 +82,60 @@ func TestSeedIsRepeatable(t *testing.T) {
 	if !strings.Contains(out, "user admin already exists") || !strings.Contains(out, "user demo already exists") {
 		t.Fatalf("second run output %q lacks the already-exists notes", out)
 	}
+	if !strings.Contains(out, `post "Welcome to the advanced demo" already exists`) {
+		t.Fatalf("second run output %q lacks the post already-exists notes", out)
+	}
 
 	// The grant is not duplicated: one admin assignment row, two accounts
 	// — the semantic no-op a re-run promises.
 	assertCount(t, app, "user", 2)
 	assertCount(t, app, "auth_assignment", 1)
+	assertCount(t, app, "post", 3)
+}
+
+func TestSeedCreatesDemoPosts(t *testing.T) {
+	app := newTestApp(t)
+	ctx := app.WithContext(context.Background())
+
+	if _, err := runSeed(t, app); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// The demo content exists with its workflow split: two published posts
+	// the frontend lists, one draft only the backend sees.
+	published, err := ar.New[models.Post](ctx).Where("status = ?", models.PostStatusPublished).Count()
+	if err != nil {
+		t.Fatalf("counting published posts: %v", err)
+	}
+	if published != 2 {
+		t.Errorf("published post count = %d, want 2", published)
+	}
+	drafts, err := ar.New[models.Post](ctx).Where("status = ?", models.PostStatusDraft).Count()
+	if err != nil {
+		t.Fatalf("counting drafts: %v", err)
+	}
+	if drafts != 1 {
+		t.Errorf("draft post count = %d, want 1", drafts)
+	}
+
+	// The seeded admin wrote every post — the author association the
+	// backend's listing and the frontend's byline resolve.
+	admin, err := ar.New[models.User](ctx).Where("username = ?", "admin").One()
+	if err != nil {
+		t.Fatalf("loading admin: %v", err)
+	}
+	posts, err := ar.New[models.Post](ctx).All()
+	if err != nil {
+		t.Fatalf("loading posts: %v", err)
+	}
+	for _, post := range posts {
+		if post.AuthorID != admin.ID {
+			t.Errorf("post %q author id = %d, want the seeded admin's %d", post.Title, post.AuthorID, admin.ID)
+		}
+		if post.CreatedAt.IsZero() {
+			t.Errorf("post %q carries no creation stamp", post.Title)
+		}
+	}
 }
 
 // assertCount asserts the row count of one table.

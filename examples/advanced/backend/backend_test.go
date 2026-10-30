@@ -27,6 +27,7 @@ import (
 	"github.com/goyii2/framework/migrate"
 	"github.com/goyii2/framework/rbac"
 	"github.com/goyii2/framework/session"
+	goyiiurl "github.com/goyii2/framework/url"
 	"github.com/goyii2/framework/web"
 )
 
@@ -36,9 +37,11 @@ import (
 // directory, the frontend partition (the login page the guard redirects
 // to), the auth manager over the RBAC tables, and the partition's own
 // Register — plus two accounts: admin carries the admin role through an
-// RBAC assignment, demo holds none. The pool is capped at one connection
-// because an in-memory database exists per connection.
-func newBackendHandler(t *testing.T) *web.Handler {
+// RBAC assignment, demo holds none. The handler's route table becomes the
+// url.To default, like the production assembly. The pool is capped at one
+// connection because an in-memory database exists per connection. The
+// application is returned alongside for direct database assertions.
+func newBackendHandler(t *testing.T) (*web.Handler, *base.Application) {
 	t.Helper()
 	conn, err := db.New(db.Config{Driver: "sqlite", DSN: ":memory:"})
 	if err != nil {
@@ -69,6 +72,7 @@ func newBackendHandler(t *testing.T) *web.Handler {
 	app.SetSession(sess)
 
 	h := web.NewHandler(app) // CSRF on, like the production assembly
+	goyiiurl.SetDefault(h.URLs())
 	h.SessionManager().IdentityFinder = models.FindIdentity(app)
 	if err := frontend.Register(h, app); err != nil {
 		t.Fatalf("frontend.Register: %v", err)
@@ -105,7 +109,7 @@ func newBackendHandler(t *testing.T) *web.Handler {
 	if err := auth.Assign("admin", admin.GetID()); err != nil {
 		t.Fatalf("assigning the admin role: %v", err)
 	}
-	return h
+	return h, app
 }
 
 // newBrowser serves h and returns a client carrying a cookie jar — the
@@ -172,7 +176,7 @@ func login(t *testing.T, client *http.Client, srvURL, username, password string)
 }
 
 func TestBackendGuardThreeStates(t *testing.T) {
-	h := newBackendHandler(t)
+	h, _ := newBackendHandler(t)
 
 	// Guest: every path below /backend points at the login page instead of
 	// answering content — the explicit module route and the convention

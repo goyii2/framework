@@ -45,6 +45,7 @@ import (
 	migratecommands "github.com/goyii2/framework/migrate/commands"
 	"github.com/goyii2/framework/rbac"
 	"github.com/goyii2/framework/session"
+	"github.com/goyii2/framework/url"
 	"github.com/goyii2/framework/web"
 )
 
@@ -88,6 +89,10 @@ func main() {
 	base.SetDefault(app) // background code without a request context resolves this instance
 
 	handler := web.NewHandler(app)
+	// Reverse URL generation: the partitions and their views resolve links
+	// by route name (url.To), so this handler's named-route table is the
+	// package-level default they read.
+	url.SetDefault(handler.URLs())
 	// The shared user model resolves a session's stored identity id back to
 	// the account row — the bridge that turns a session cookie into the
 	// logged-in state the frontend navigation shows.

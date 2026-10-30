@@ -13,6 +13,7 @@ import (
 
 	"github.com/a-h/templ"
 
+	"github.com/goyii2/framework/url"
 	"github.com/goyii2/framework/view"
 	"github.com/goyii2/framework/web"
 )
@@ -47,6 +48,30 @@ type LoginData struct {
 	Error    string
 }
 
+// PostListData drives the public posts listing.
+type PostListData struct {
+	Posts []PostCard
+}
+
+// PostCard is one entry of the public listing: the title's link resolved by
+// route name, a body preview and the byline.
+type PostCard struct {
+	Title   string
+	Excerpt string
+	Author  string
+	Created string
+	ViewURL string
+}
+
+// PostShowData drives the public detail page.
+type PostShowData struct {
+	Title   string
+	Body    string
+	Author  string
+	Created string
+	BackURL string
+}
+
 // Layout installs the frontend's light frame on every request: the frame
 // wraps HTML renders only, so non-HTML replies never touch it. The frame
 // closes over the request Context, so it stays current even for error
@@ -71,13 +96,17 @@ func frontLayout(c *web.Context) view.Layout {
 
 // buildShell assembles the chrome at render time: the session area flips on
 // the request's identity, so the navigation shows the account name and the
-// logout form once a login is bound (and the login link for guests).
+// logout form once a login is bound (and the login link for guests). The
+// posts entry resolves by route name — the same table every link of the
+// partition reads — and Path marks the navigation's active item.
 func buildShell(c *web.Context) shellData {
 	data := shellData{
 		AppName:   c.App().Name(),
 		CSRF:      c.CsrfToken(),
 		LoginURL:  LoginURL,
 		LogoutURL: LogoutURL,
+		PostsURL:  url.To("post/index", nil),
+		Path:      c.Request().URL.Path,
 	}
 	if c.User() != nil {
 		if identity := c.User().Identity(); identity != nil {
@@ -103,6 +132,8 @@ func fieldErrors(errors map[string][]string, field string) string {
 func Register(r *view.Registry) {
 	r.Register("site/index", view.Typed(homePage))
 	r.Register("site/login", view.Typed(loginPage))
+	r.Register("post/index", view.Typed(postsPage))
+	r.Register("post/view", view.Typed(postViewPage))
 	r.Register("error", view.Typed(func(d view.ErrorData) templ.Component {
 		return errorPage(errorPageData{
 			Heading: strconv.Itoa(d.Status) + " " + d.Name,

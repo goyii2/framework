@@ -24,16 +24,19 @@ import (
 	"github.com/goyii2/framework/examples/advanced/common/models"
 	"github.com/goyii2/framework/migrate"
 	"github.com/goyii2/framework/session"
+	goyiiurl "github.com/goyii2/framework/url"
 	"github.com/goyii2/framework/web"
 )
 
 // newFrontendHandler assembles the application behind the frontend
 // partition: an in-memory sqlite database the real migrations shaped, a
 // file-backed session store in a per-test directory, the shared identity
-// finder, the partition's own Register — and one demo account. The pool is
-// capped at one connection because an in-memory database exists per
-// connection.
-func newFrontendHandler(t *testing.T) *web.Handler {
+// finder, the partition's own Register — and one demo account. The
+// handler's route table becomes the url.To default, like the production
+// assembly. The pool is capped at one connection because an in-memory
+// database exists per connection. The application is returned alongside
+// for direct database seeding.
+func newFrontendHandler(t *testing.T) (*web.Handler, *base.Application) {
 	t.Helper()
 	conn, err := db.New(db.Config{Driver: "sqlite", DSN: ":memory:"})
 	if err != nil {
@@ -64,6 +67,7 @@ func newFrontendHandler(t *testing.T) *web.Handler {
 	app.SetSession(sess)
 
 	h := web.NewHandler(app) // CSRF on, like the production assembly
+	goyiiurl.SetDefault(h.URLs())
 	h.SessionManager().IdentityFinder = models.FindIdentity(app)
 	if err := Register(h, app); err != nil {
 		t.Fatalf("frontend.Register: %v", err)
@@ -77,7 +81,7 @@ func newFrontendHandler(t *testing.T) *web.Handler {
 	if err := user.Save(); err != nil {
 		t.Fatalf("seeding the demo account: %v", err)
 	}
-	return h
+	return h, app
 }
 
 // newBrowser serves h and returns a client carrying a cookie jar — the
@@ -134,7 +138,7 @@ func postForm(t *testing.T, client *http.Client, target string, vals url.Values)
 }
 
 func TestLoginLogoutFlow(t *testing.T) {
-	h := newFrontendHandler(t)
+	h, _ := newFrontendHandler(t)
 	client, srv := newBrowser(t, h)
 
 	// Anonymous navigation: the login link, no logout form.
@@ -209,7 +213,7 @@ func TestLoginLogoutFlow(t *testing.T) {
 }
 
 func TestLoginBlankFieldsAnswerPerFieldErrors(t *testing.T) {
-	h := newFrontendHandler(t)
+	h, _ := newFrontendHandler(t)
 	client, srv := newBrowser(t, h)
 
 	body, _ := get(t, client, srv.URL+"/login")

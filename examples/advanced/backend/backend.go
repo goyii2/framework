@@ -7,8 +7,8 @@
 // no role attributes of their own, the seed command grants the role.
 // Register is the partition's assembly function: main.go calls it with
 // the handler, the application and the auth manager it installed, and
-// everything the backend owns — its frame, its guard and its dashboard —
-// is wired here.
+// everything the backend owns — its frame, its guard, its dashboard and
+// its post management — is wired here.
 package backend
 
 import (
@@ -75,6 +75,22 @@ func Register(h *web.Handler, app *base.Application, auth web.AccessChecker) err
 		return err
 	}
 	routes.Get("{$}", dash.ActionIndex).Name("dashboard")
+
+	// The backend's content management: every route below /backend/posts,
+	// named module-relative (the registrar prefixes "backend/") so links and
+	// redirects resolve by name from either partition. The post controller
+	// joins the module registry too, so /backend/post/index resolves through
+	// the convention fallback as well.
+	post := &controllers.PostController{}
+	if err := mod.RegisterController("post", post); err != nil {
+		return err
+	}
+	routes.Get("/posts", post.ActionIndex).Name("post/index")
+	routes.Get("/posts/new", post.ActionNew).Name("post/new")
+	routes.Post("/posts", post.ActionStore).Name("post/store")
+	routes.Get("/posts/{id:[0-9]+}/edit", post.ActionEdit).Name("post/edit")
+	routes.Post("/posts/{id:[0-9]+}", post.ActionSave).Name("post/save")
+	routes.Post("/posts/{id:[0-9]+}/delete", post.ActionDestroy).Name("post/delete")
 
 	// The bare prefix is not mountable through the module registrar (every
 	// module route joins below the prefix), so it answers with a canonical
