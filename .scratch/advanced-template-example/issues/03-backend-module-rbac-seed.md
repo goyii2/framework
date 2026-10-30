@@ -1,6 +1,6 @@
 # 03: backend 模块、RBAC 守卫与 seed
 
-Status: ready-for-agent
+Status: claimed
 Blocked by: 02（用户登录与 user/create 命令）
 
 **What to build:** backend 分区成形为 `/backend` 模块：装配函数、深色侧边栏 Layout（ModuleRoutes.Layout）、模块级 AccessControl 要求 `admin` 角色（rbac DbManager 及其迁移）、dashboard 页；`seed` 命令创建 admin 用户并授予角色。演示 Yii2 高级模板的 backend 应用形态：未登录访问被跳转登录，无角色用户被拒，admin 可见深色 dashboard。
