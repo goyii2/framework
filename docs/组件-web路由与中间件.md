@@ -82,7 +82,7 @@ func (c *PostController) ActionView(ctx *web.Context) error {
 | `web.AccessControl` | 角色授权 | 规则序评估，首条命中即决；`?`=guest、`@`=登录、其余为 RBAC 项（接 AuthManager 后端）；默认拒 |
 | `web.VerbFilter` | 动词限制 | 命中规则外的动词 `405 + Allow` |
 | `web.ContentNegotiator` | 内容协商 | 响应按 Accept 选格式，请求体 Content-Type 白名单（415） |
-| `web.Csrf` | 双提交 cookie | 安全请求种 `_csrf` cookie；写请求须回同值（头 `X-Csrf-Token` 或表单字段 `_csrf`）；`web.disableCsrf` 可全局关 |
+| `web.Csrf` | 双提交 cookie | 安全请求种 `_csrf` cookie；写请求须回同值（头 `X-Csrf-Token` 或表单字段 `_csrf`）；`web.WithoutCsrf()` option（传入 `web.NewHandler`）可全局关 |
 | `web.Cors` | 跨域 | 预检与常规 CORS 头 |
 | `web.HttpCache` | 协商缓存 | ETag / Last-Modified |
 | `web.PageCache` | 整页缓存 | 命中直接回放 200 的 GET 文本页（body + status + Content-Type）；key = 路由 + 规范化查询串 + `VaryBy` 值；`Duration` 生命周期、`cache.Dependency` 依赖失效；存储走 `app.Cache()` 组件 |

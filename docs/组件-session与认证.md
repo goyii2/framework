@@ -80,7 +80,7 @@ h.Use(web.HttpBearer{Authenticate: web.StaticBearerTokens(map[string]web.Identit
 <input type="hidden" name="_csrf" value="{{ .Csrf }}">
 ```
 
-action 侧 `c.CsrfToken()` 取当前 token。纯 API（每请求自带认证）可全局关闭：`web.disableCsrf: true`。查询串里的 token 永不接受（会经 Referrer 泄漏）。
+action 侧 `c.CsrfToken()` 取当前 token。纯 API（每请求自带认证）可全局关闭：构造 `web.NewHandler` 时传 `web.WithoutCsrf()` option。查询串里的 token 永不接受（会经 Referrer 泄漏）。
 
 ## 相关文档
 
