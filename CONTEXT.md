@@ -122,6 +122,12 @@ Controller 内的最小可路由请求处理单元（如 `post/view` 中的 `vie
 
 前端构建产物名到带 hash URL 的映射文件；框架按它引用资源，开发期直连 Vite dev server。
 
+### advanced 示例（advanced template example）
+
+对应 Yii2 高级模板的示例应用及其映射词汇：frontend=根作用域（非模块）、backend=`/backend` 模块（含嵌套子模块）、console=同一二进制内的命令、common=跨分区共享包、environments=按环境 overlay 的项目配置。
+
+- 避免：前后台独立登录——以单一登录 + RBAC 角色守卫取代，示例文档注明该差异
+
 <!-- 条目格式建议：
 
 ### 术语名（EnglishIdentifier）
