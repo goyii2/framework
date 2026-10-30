@@ -10,6 +10,7 @@ goyii/framework 使用文档目录（面向使用者：部署、配置、使用�
 |---|---|
 | [安装](安装.md) | 环境要求、获取框架、包与 Yii2 命名空间对应表 |
 | [快速上手](快速上手.md) | 从零跑起 examples/basic：浏览器链路 + JSON API + 一键验收 |
+| [示例：advanced 模板](示例-advanced模板.md) | 从零跑起 examples/advanced：应用分区与 Module、Yii2 高级模板映射、单一登录 + RBAC、dev/prod overlay |
 | [配置参考](配置参考.md) | 全部配置段落、字段、默认值与环境变量 |
 
 ## 组件使用说明

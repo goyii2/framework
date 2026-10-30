@@ -1,8 +1,8 @@
 # The dev overlay: loaded on top of app.yaml whenever GOYII_ENV selects dev
 # (the default), replacing only the fields it names — everything else keeps
-# its app.yaml value. Any other environment (GOYII_ENV=prod ...) reads
-# app.yaml alone until a matching web-<env>.yaml sits next to it (the prod
-# overlay joins in a later slice).
+# its app.yaml value. Other environments overlay the same way through their
+# own web-<env>.yaml (see web-prod.yaml, which also interpolates ${VAR}
+# placeholders); an environment with no overlay file reads app.yaml alone.
 #
 # The overlay flips the debug flag on — the environment difference the front
 # page also shows: dev error pages reveal their cause while other

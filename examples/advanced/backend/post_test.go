@@ -80,7 +80,7 @@ func TestBackendPostManagement(t *testing.T) {
 	}
 	token := match[1]
 
-	body, status, location := postForm(t, admin, srv.URL+"/backend/posts", url.Values{
+	_, status, location := postForm(t, admin, srv.URL+"/backend/posts", url.Values{
 		"_csrf":  {token},
 		"title":  {"First managed post"},
 		"status": {"published"},
@@ -117,7 +117,7 @@ func TestBackendPostManagement(t *testing.T) {
 	if status != http.StatusOK || !strings.Contains(body, `value="First managed post"`) {
 		t.Fatalf("edit form status = %d, prefilled = %v", status, strings.Contains(body, `value="First managed post"`))
 	}
-	body, status, location = postForm(t, admin, srv.URL+"/backend/posts/"+strconv.FormatInt(created.ID, 10), url.Values{
+	_, status, location = postForm(t, admin, srv.URL+"/backend/posts/"+strconv.FormatInt(created.ID, 10), url.Values{
 		"_csrf":  {token},
 		"title":  {"Renamed post"},
 		"status": {"draft"},
@@ -135,7 +135,7 @@ func TestBackendPostManagement(t *testing.T) {
 	}
 
 	// Delete: the row disappears from the listing and the database.
-	body, status, location = postForm(t, admin, srv.URL+"/backend/posts/"+strconv.FormatInt(created.ID, 10)+"/delete", url.Values{
+	_, status, location = postForm(t, admin, srv.URL+"/backend/posts/"+strconv.FormatInt(created.ID, 10)+"/delete", url.Values{
 		"_csrf": {token},
 	})
 	if status != http.StatusFound || location != "/backend/posts" {

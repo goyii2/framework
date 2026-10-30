@@ -48,6 +48,18 @@ go run . serve        # http://127.0.0.1:8090
 
 浏览器完整走通：登录 -> GridView 过滤/排序/分页列表 -> 详情 -> ActiveForm 编辑（验证 + CSRF + 422 回显）-> 按账号差异化的导航与按钮 -> 中英文切换（界面与验证消息）-> 测试邮件 -> 队列入队与 worker 消费 -> 整页缓存命中回放 -> 页底调试面板。全部细节见 [docs/快速上手](docs/快速上手.md)。
 
+advanced 模板示例（Yii2 高级模板形态：单进程单端口，frontend=根作用域、backend=`/backend` 模块、console=同一二进制命令、common=共享包、environments=overlay）：
+
+```bash
+cd framework/examples/advanced
+
+go run . migrate up   # user + post + RBAC 四表
+go run . seed         # admin/admin123（admin 角色）+ demo/demo123（无角色）+ 3 篇文章
+go run . serve        # http://127.0.0.1:8090（前台根作用域 + /backend 后台模块）
+```
+
+前台匿名浏览 `/posts`（仅 published）、`/login` 登录；后台 `/backend` 守卫链演示三态（匿名 302 -> 登录页、demo 403、admin 200 进深色后台做 post CRUD）；嵌套子模块 `/backend/system/user/list` 约定路由 + DataProvider 分页；`GOYII_ENV=prod` + `web-prod.yaml` 的 `${VAR}` 插值演示生产配置。全部细节见 [docs/示例-advanced模板](docs/示例-advanced模板.md)。
+
 一键验收（含 `-race` 全量测试与组件面冒烟）：
 
 ```bash
@@ -60,6 +72,7 @@ go run . serve        # http://127.0.0.1:8090
 
 - [安装](docs/安装.md) —— 环境与包对照表
 - [快速上手](docs/快速上手.md) —— 从零跑通 examples/basic
+- [示例：advanced 模板](docs/示例-advanced模板.md) —— 应用分区与 Module：examples/advanced
 - [配置参考](docs/配置参考.md) —— 全部配置段落与环境变量
 - 组件使用说明：[base 与 config](docs/组件-base与config.md) | [web 路由与中间件](docs/组件-web路由与中间件.md) | [session 与认证](docs/组件-session与认证.md) | [db 与 ActiveRecord](docs/组件-db与ActiveRecord.md) | [validators](docs/组件-validators.md) | [migrate](docs/组件-migrate.md) | [log](docs/组件-log.md) | [cache](docs/组件-cache.md) | [rbac](docs/组件-rbac.md) | [i18n](docs/组件-i18n.md) | [dataprovider](docs/组件-dataprovider.md) | [behaviors](docs/组件-behaviors.md) | [mail](docs/组件-mail.md) | [view 与 templ](docs/组件-view与templ.md) | [debug 面板](docs/组件-debug面板.md) | [gii 代码生成器](docs/组件-gii代码生成器.md) | [vite 前端构建](docs/组件-vite.md) | [authclient 第三方登录](docs/组件-authclient第三方登录.md)
 

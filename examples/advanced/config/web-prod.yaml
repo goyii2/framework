@@ -1,0 +1,28 @@
+# The prod overlay: loaded on top of app.yaml whenever GOYII_ENV=prod
+# selects it, replacing only the fields it names. The values interpolate
+# from the process environment before the yaml parses (compose style):
+# ${VAR} expands from the environment (empty when unset) and ${VAR:-default}
+# falls back to the default when unset or empty; a third form (colon-
+# question) marks a value mandatory and fails the load when it is missing.
+# The syntax works anywhere in the file, comments included, so this comment
+# spells that last form out in words.
+#
+# The defaults below keep `GOYII_ENV=prod go run . serve` working straight
+# from a clone; a deployment sets the variables instead of editing yaml.
+# Whole-field environment overrides (WEB_LISTEN, LOG_LEVEL, ...) still win
+# last, on top of whatever the interpolation spliced together.
+app:
+  # Prod keeps the terse error pages. The key is stated on purpose: the
+  # difference to dev (web-dev.yaml flips it on) stays readable from the
+  # two overlay files side by side. APP_DEBUG=true overrides for a look
+  # inside a prod-shaped process.
+  debug: false
+
+web:
+  # The listen address a deployment injects; loopback with the demo port as
+  # the out-of-the-box default.
+  listen: "${ADVANCED_LISTEN:-127.0.0.1:8090}"
+
+log:
+  # Prod stays quieter than the console-flavored dev default.
+  level: "${ADVANCED_LOG_LEVEL:-warn}"

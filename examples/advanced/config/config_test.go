@@ -32,10 +32,10 @@ func TestLoadDevAppliesOverlay(t *testing.T) {
 }
 
 // TestLoadEnvironmentWithoutOverlayUsesBaseValues pins the other half: an
-// environment with no web-<env>.yaml file reads app.yaml alone — the base
-// keeps the terse debug setting.
+// environment with no web-<env>.yaml file (staging ships none) reads
+// app.yaml alone — the base keeps the terse debug setting.
 func TestLoadEnvironmentWithoutOverlayUsesBaseValues(t *testing.T) {
-	t.Setenv("GOYII_ENV", "prod")
+	t.Setenv("GOYII_ENV", "staging")
 	t.Setenv("APP_DEBUG", "")
 
 	cfg, err := goyii.LoadAs[Config](".")
@@ -44,6 +44,52 @@ func TestLoadEnvironmentWithoutOverlayUsesBaseValues(t *testing.T) {
 	}
 	if cfg.App.Debug {
 		t.Fatal("App.Debug = true, want the app.yaml base value (off) with no overlay present")
+	}
+}
+
+// TestLoadProdOverlayInterpolatesDefaults pins the prod story: web-prod.yaml
+// overlays app.yaml, its ${VAR:-default} placeholders fall back to the
+// in-file defaults when the environment stays unset, and the overlay keeps
+// the terse debug setting.
+func TestLoadProdOverlayInterpolatesDefaults(t *testing.T) {
+	t.Setenv("GOYII_ENV", "prod")
+	t.Setenv("APP_DEBUG", "")
+	t.Setenv("ADVANCED_LISTEN", "")
+	t.Setenv("ADVANCED_LOG_LEVEL", "")
+
+	cfg, err := goyii.LoadAs[Config](".")
+	if err != nil {
+		t.Fatalf("LoadAs: %v", err)
+	}
+	if cfg.App.Debug {
+		t.Fatal("App.Debug = true, want the prod overlay's terse setting")
+	}
+	if cfg.Web.Listen != "127.0.0.1:8090" {
+		t.Fatalf("Web.Listen = %q, want the placeholder default 127.0.0.1:8090", cfg.Web.Listen)
+	}
+	if cfg.Log.Level != "warn" {
+		t.Fatalf("Log.Level = %q, want the placeholder default warn", cfg.Log.Level)
+	}
+}
+
+// TestLoadProdOverlayInterpolatesEnvironment pins the other prod half: a set
+// variable splices into the value, and the whole-field override (WEB_LISTEN)
+// still wins over what the interpolation assembled.
+func TestLoadProdOverlayInterpolatesEnvironment(t *testing.T) {
+	t.Setenv("GOYII_ENV", "prod")
+	t.Setenv("APP_DEBUG", "")
+	t.Setenv("ADVANCED_LISTEN", "10.0.0.9:8443")
+	t.Setenv("ADVANCED_LOG_LEVEL", "info")
+
+	cfg, err := goyii.LoadAs[Config](".")
+	if err != nil {
+		t.Fatalf("LoadAs: %v", err)
+	}
+	if cfg.Web.Listen != "10.0.0.9:8443" {
+		t.Fatalf("Web.Listen = %q, want the interpolated 10.0.0.9:8443", cfg.Web.Listen)
+	}
+	if cfg.Log.Level != "info" {
+		t.Fatalf("Log.Level = %q, want the interpolated info", cfg.Log.Level)
 	}
 }
 

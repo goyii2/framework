@@ -185,7 +185,7 @@ func TestLoginLogoutFlow(t *testing.T) {
 	}
 
 	// Correct credentials: redirect home, navigation signed in.
-	body, status, location := postForm(t, client, srv.URL+"/login", url.Values{
+	_, status, location := postForm(t, client, srv.URL+"/login", url.Values{
 		"_csrf":    {token},
 		"username": {"demo"},
 		"password": {"demo123"},
@@ -202,7 +202,7 @@ func TestLoginLogoutFlow(t *testing.T) {
 	}
 
 	// Logout: redirect home, back to the anonymous navigation.
-	body, status, location = postForm(t, client, srv.URL+"/logout", url.Values{"_csrf": {token}})
+	_, status, location = postForm(t, client, srv.URL+"/logout", url.Values{"_csrf": {token}})
 	if status != http.StatusFound || location != "/" {
 		t.Fatalf("logout status = %d location = %q, want 302 /", status, location)
 	}
