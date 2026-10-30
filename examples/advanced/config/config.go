@@ -15,12 +15,12 @@ package config
 import (
 	"github.com/goyii2/framework/db"
 	"github.com/goyii2/framework/log"
+	"github.com/goyii2/framework/session"
 )
 
 // Config is everything this application reads from its configuration
 // directory: the identity fields (app, web) and the parameter bundles of
-// the components it wires. Sections join as later slices need them
-// (session for login, ...).
+// the components it wires. Sections join as later slices need them.
 type Config struct {
 	// App is the application's identity. Name shows in the layout; Debug
 	// turns on the verbose error pages. The dev overlay flips Debug on, so
@@ -38,6 +38,7 @@ type Config struct {
 		Listen string `yaml:"listen"`
 	} `yaml:"web"`
 
-	DB  db.Config  `yaml:"db"`
-	Log log.Config `yaml:"log"`
+	DB      db.Config      `yaml:"db"`
+	Session session.Config `yaml:"session"`
+	Log     log.Config     `yaml:"log"`
 }

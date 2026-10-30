@@ -14,10 +14,11 @@ import (
 )
 
 // Register wires the frontend partition: the light layout around every
-// page, the named views behind Context.Render, the explicit "/" home route
-// and the site controller in the root registry, so /site/{action} resolves
-// through the convention fallback as well — the root-scope mapping the
-// Yii2 advanced template gives its frontend application.
+// page, the named views behind Context.Render, the explicit routes (home,
+// the login form and its submission, logout) and the site controller in the
+// root registry, so /site/{action} resolves through the convention fallback
+// as well — the root-scope mapping the Yii2 advanced template gives its
+// frontend application.
 func Register(h *web.Handler, app *base.Application) error {
 	h.Use(views.Layout())
 	views.Register(h.Views())
@@ -25,6 +26,9 @@ func Register(h *web.Handler, app *base.Application) error {
 	site := &controllers.SiteController{}
 	sc := h.Ctrl(site)
 	sc.Get("/", site.ActionIndex).Name("site/index")
+	sc.Get(views.LoginURL, site.ActionLoginForm).Name("site/login")
+	sc.Post(views.LoginURL, site.ActionLogin)
+	sc.Post(views.LogoutURL, site.ActionLogout).Name("site/logout")
 
 	return app.RegisterController("site", site)
 }

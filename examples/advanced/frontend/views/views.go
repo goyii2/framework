@@ -9,6 +9,7 @@ package views
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/a-h/templ"
 
@@ -16,21 +17,35 @@ import (
 	"github.com/goyii2/framework/web"
 )
 
-// HomeData drives the front page. Env and Debug echo what the
-// configuration resolved for this process — the environment overlay's
-// observable difference.
+// The session area's destinations. The frontend owns the root scope, so the
+// plain paths are the named routes' addresses at once; controllers and the
+// layout chrome share them, so each has one home.
+const (
+	LoginURL  = "/login"
+	LogoutURL = "/logout"
+)
+
+// HomeData drives the front page. Env and Debug echo what the configuration
+// resolved for this process — the environment overlay's observable
+// difference; SignedIn/User carry the session state the greeting shows.
 type HomeData struct {
 	AppName  string
 	Env      string
 	Debug    bool
+	SignedIn bool
+	User     string
 	LoginURL string
 }
 
-// LoginPlaceholder is where the login form will live once its slice lands;
-// until then the layout's navigation and the front page point here as an
-// open placeholder. Controllers and the layout chrome share it, so the
-// placeholder has one home.
-const LoginPlaceholder = "/login"
+// LoginData drives the login form; Errors carries the inline schema issues
+// per field, Error the general (wrong credentials) note.
+type LoginData struct {
+	Action   string
+	CSRF     string
+	Username string
+	Errors   map[string][]string
+	Error    string
+}
 
 // Layout installs the frontend's light frame on every request: the frame
 // wraps HTML renders only, so non-HTML replies never touch it. The frame
@@ -50,8 +65,36 @@ func Layout() web.Middleware {
 // frontLayout adapts one request into its page frame.
 func frontLayout(c *web.Context) view.Layout {
 	return func(p view.Page) templ.Component {
-		return shell(shellData{AppName: c.App().Name(), LoginURL: LoginPlaceholder}, p.Title, p.Content)
+		return shell(buildShell(c), p.Title, p.Content)
 	}
+}
+
+// buildShell assembles the chrome at render time: the session area flips on
+// the request's identity, so the navigation shows the account name and the
+// logout form once a login is bound (and the login link for guests).
+func buildShell(c *web.Context) shellData {
+	data := shellData{
+		AppName:   c.App().Name(),
+		CSRF:      c.CsrfToken(),
+		LoginURL:  LoginURL,
+		LogoutURL: LogoutURL,
+	}
+	if c.User() != nil {
+		if identity := c.User().Identity(); identity != nil {
+			data.User = identity.GetName()
+		}
+	}
+	return data
+}
+
+// fieldErrors joins one field's validation messages for display below its
+// input.
+func fieldErrors(errors map[string][]string, field string) string {
+	msgs := errors[field]
+	if len(msgs) == 0 {
+		return ""
+	}
+	return strings.Join(msgs, "; ")
 }
 
 // Register puts the frontend's pages into the named-view registry behind
@@ -59,6 +102,7 @@ func frontLayout(c *web.Context) view.Layout {
 // handler's HTML replies in the frontend frame.
 func Register(r *view.Registry) {
 	r.Register("site/index", view.Typed(homePage))
+	r.Register("site/login", view.Typed(loginPage))
 	r.Register("error", view.Typed(func(d view.ErrorData) templ.Component {
 		return errorPage(errorPageData{
 			Heading: strconv.Itoa(d.Status) + " " + d.Name,

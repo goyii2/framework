@@ -5,10 +5,14 @@
 package views
 
 // shellData is the chrome of every framed page, assembled at render time
-// from the request's context.
+// from the request's context. User is empty for guests, so the session area
+// flips between the login link and the name + logout form.
 type shellData struct {
-	AppName  string
-	LoginURL string
+	AppName   string
+	User      string
+	CSRF      string
+	LoginURL  string
+	LogoutURL string
 }
 
 templ shell(nav shellData, title string, content templ.Component) {
@@ -27,12 +31,18 @@ templ shell(nav shellData, title string, content templ.Component) {
 				header nav { display: flex; gap: 1rem; }
 				header nav a { text-decoration: none; color: #334155; }
 				header nav a.active { color: #1a5fb4; font-weight: 600; }
-				.session { margin-left: auto; }
+				.session { margin-left: auto; display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap; }
 				.session a { text-decoration: none; }
+				.session form { display: inline; }
+				.session form button { padding: 0.15rem 0.6rem; font: inherit; cursor: pointer; }
 				main { max-width: 60rem; margin: 1.5rem auto; padding: 0 1rem; }
 				footer { text-align: center; color: #94a3b8; padding: 1rem; font-size: 0.85rem; }
 				.status { display: inline-block; margin: 0.15rem 0.2rem; padding: 0.1rem 0.6rem; border-radius: 999px; background: #e0f2fe; color: #075985; font-size: 0.85rem; }
 				.error { color: #b91c1c; }
+				form label { display: block; margin: 0.8rem 0; font-weight: 600; }
+				form label span.error { display: block; font-weight: 400; }
+				form button { margin-top: 0.8rem; padding: 0.35rem 1rem; font: inherit; cursor: pointer; }
+				form input { display: block; margin-top: 0.25rem; padding: 0.35rem; font: inherit; }
 			</style>
 		</head>
 		<body>
@@ -42,7 +52,15 @@ templ shell(nav shellData, title string, content templ.Component) {
 					<a href="/" class="active">Home</a>
 				</nav>
 				<div class="session">
-					<a href={ templ.URL(nav.LoginURL) }>Login</a>
+					if nav.User != "" {
+						<span>{ nav.User }</span>
+						<form method="post" action={ templ.URL(nav.LogoutURL) }>
+							<input type="hidden" name="_csrf" value={ nav.CSRF }/>
+							<button type="submit">Logout</button>
+						</form>
+					} else {
+						<a href={ templ.URL(nav.LoginURL) }>Login</a>
+					}
 				</div>
 			</header>
 			<main>
@@ -66,9 +84,45 @@ templ homePage(d HomeData) {
 			<span class="status">debug on</span>
 		}
 	</p>
-	<p>
-		<a href={ templ.URL(d.LoginURL) }>Sign in</a> — login joins in a later slice.
-	</p>
+	if d.SignedIn {
+		<p>Signed in as <strong>{ d.User }</strong>.</p>
+	} else {
+		<p>
+			<a href={ templ.URL(d.LoginURL) }>Sign in</a> — accounts come from the console:
+			<code>go run . user/create --username demo --password demo123</code>
+		</p>
+	}
+}
+
+// loginPage re-renders under the failing status on bad credentials (the
+// general note) and on blank fields (the per-field notes), with the
+// submitted username refilled.
+templ loginPage(d LoginData) {
+	<h1>Login</h1>
+	if d.Error != "" {
+		<p class="error">{ d.Error }</p>
+	}
+	if len(d.Errors) > 0 {
+		<p class="error">Fix the errors below and try again.</p>
+	}
+	<form method="post" action={ templ.URL(d.Action) }>
+		<input type="hidden" name="_csrf" value={ d.CSRF }/>
+		<label>
+			Username
+			<input type="text" name="username" value={ d.Username }/>
+			if msg := fieldErrors(d.Errors, "username"); msg != "" {
+				<span class="error">{ msg }</span>
+			}
+		</label>
+		<label>
+			Password
+			<input type="password" name="password"/>
+			if msg := fieldErrors(d.Errors, "password"); msg != "" {
+				<span class="error">{ msg }</span>
+			}
+		</label>
+		<button type="submit">Sign in</button>
+	</form>
 }
 
 // errorPageData is the unified error payload reshaped for the template; the

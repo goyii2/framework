@@ -1,22 +1,23 @@
 // The advanced example maps the Yii2 advanced template onto goyii: one
 // process, one port, partitions in packages. The frontend application is
 // the handler's root scope, the backend application lands at /backend as a
-// module, and the console application's commands (serve, migrate — later
-// seed and user-create) live in this same binary.
+// module, and the console application's commands (serve, migrate,
+// user/create — seed later) live in this same binary.
 //
 // The layout follows the advanced template's partitions:
 //
 //	config/       this project's own configuration shape and yaml files
-//	common/       the shared package: migrations (models join in later slices)
+//	common/       the shared package: models and migrations
 //	frontend/     the frontend application partition (root scope)
 //	backend/      the backend application partition (module /backend; a later slice)
-//	commands/     the user-defined console commands (a later slice)
+//	commands/     the user-defined console commands (user/create; more later)
 //
 // Each partition exposes its own assembly function; main only composes.
 //
 // Run it from this directory:
 //
 //	go run . migrate up
+//	go run . user/create --username demo --password demo123
 //	go run . serve
 //
 // The application lives in the framework's module on purpose: the example
@@ -33,20 +34,25 @@ import (
 	// defines, from app.yaml + web-<env>.yaml + environment variables.
 	goyii "github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/console"
+	"github.com/goyii2/framework/examples/advanced/commands"
 	"github.com/goyii2/framework/examples/advanced/common/migrations"
+	"github.com/goyii2/framework/examples/advanced/common/models"
 	"github.com/goyii2/framework/examples/advanced/config"
 	"github.com/goyii2/framework/examples/advanced/frontend"
 	"github.com/goyii2/framework/log"
 	migratecommands "github.com/goyii2/framework/migrate/commands"
+	"github.com/goyii2/framework/session"
 	"github.com/goyii2/framework/web"
 )
 
 func main() {
-	// runtime/ holds the sqlite database. SQLite refuses to open a file
-	// inside a missing directory, so the directory exists before anything
-	// opens it.
-	if err := os.MkdirAll("runtime", 0o755); err != nil {
-		fail(err)
+	// runtime/ holds the sqlite database and the session records. SQLite
+	// refuses to open a file inside a missing directory, so the directories
+	// exist before anything opens them.
+	for _, dir := range []string{"runtime", "runtime/session"} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			fail(err)
+		}
 	}
 
 	// The project's own configuration: config/ holds the struct and the yaml
@@ -71,9 +77,18 @@ func main() {
 	if err := app.ConnectDB(cfg.DB, cfg.Log.Gorm); err != nil {
 		fail(err)
 	}
+	sess, err := session.New(cfg.Session)
+	if err != nil {
+		fail(err)
+	}
+	app.SetSession(sess)
 	base.SetDefault(app) // background code without a request context resolves this instance
 
 	handler := web.NewHandler(app)
+	// The shared user model resolves a session's stored identity id back to
+	// the account row — the bridge that turns a session cookie into the
+	// logged-in state the frontend navigation shows.
+	handler.SessionManager().IdentityFinder = models.FindIdentity(app)
 	// The frontend partition registers itself: its light layout, its views
 	// and its root-scope routes all live behind its own assembly function.
 	if err := frontend.Register(handler, app); err != nil {
@@ -84,8 +99,9 @@ func main() {
 
 	con := console.New(app, console.WithHandler(handler), console.WithListen(cfg.Web.Listen))
 	con.AddCommand(migratecommands.New(app, migrations.All()))
-	// The commands partition adds its own commands here (seed, user/create)
-	// once their slices land.
+	con.AddCommand(commands.NewUserCreateCommand())
+	// The commands partition adds its seed command here once that slice
+	// lands.
 	if err := con.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
