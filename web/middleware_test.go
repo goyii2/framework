@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/goyii2/framework/base"
-	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/web"
 )
 
@@ -80,8 +79,8 @@ func (plainController) ActionPing(c *web.Context) error {
 // newMiddlewareApp wires the global chain, one middleware-declaring
 // controller (explicit mount + convention) and one plain controller.
 func newMiddlewareApp(trace *syncBuffer) (*web.Handler, *base.Application) {
-	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}})
-	h := web.NewHandler(app)
+	app := base.New()
+	h := web.NewHandler(app, web.WithoutCsrf())
 	h.Use(traceMiddleware(trace, "global-a"), traceMiddleware(trace, "global-b"))
 
 	tagged := middlewareController{trace: trace}
@@ -183,8 +182,8 @@ func (g guardedController) ActionIndex(c *web.Context) error {
 }
 
 func TestControllerMiddlewareRejectsWithUnifiedError(t *testing.T) {
-	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}})
-	h := web.NewHandler(app)
+	app := base.New()
+	h := web.NewHandler(app, web.WithoutCsrf())
 
 	ran := false
 	ctrl := guardedController{ran: &ran}
@@ -215,8 +214,8 @@ func TestControllerMiddlewareRejectsWithUnifiedError(t *testing.T) {
 }
 
 func TestMiddlewareSeesRequestWebContext(t *testing.T) {
-	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}})
-	h := web.NewHandler(app)
+	app := base.New()
+	h := web.NewHandler(app, web.WithoutCsrf())
 	h.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			c := web.FromContext(r.Context())
@@ -244,8 +243,8 @@ func TestMiddlewareSeesRequestWebContext(t *testing.T) {
 // still applies to them.
 func TestModuleMiddlewareWrapsModuleRoutes(t *testing.T) {
 	trace := &syncBuffer{}
-	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}})
-	h := web.NewHandler(app)
+	app := base.New()
+	h := web.NewHandler(app, web.WithoutCsrf())
 	h.Use(traceMiddleware(trace, "global"))
 
 	admin, err := base.NewModule(app, "/admin")

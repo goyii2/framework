@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/goyii2/framework/base"
-	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/url"
 	"github.com/goyii2/framework/web"
 )
@@ -59,7 +58,7 @@ func (dashController) ActionIndex(c *web.Context) error {
 // filter tests).
 func newConventionApp(t *testing.T) (*web.Handler, *base.Application) {
 	t.Helper()
-	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}})
+	app := base.New()
 	if err := app.RegisterController("site", siteController{}); err != nil {
 		t.Fatalf("registering root controller: %v", err)
 	}
@@ -73,7 +72,7 @@ func newConventionApp(t *testing.T) (*web.Handler, *base.Application) {
 	if err := admin.RegisterController("user", userController{}); err != nil {
 		t.Fatalf("registering module controller: %v", err)
 	}
-	return web.NewHandler(app), app
+	return web.NewHandler(app, web.WithoutCsrf()), app
 }
 
 // req performs a single request against h and returns the raw response.
@@ -115,7 +114,7 @@ func source(t *testing.T, h http.Handler, target string) string {
 }
 
 func TestExplicitRouteParamsTypedValues(t *testing.T) {
-	h := web.NewHandler(base.New(config.Default()))
+	h := web.NewHandler(base.New())
 	h.Get("/post/{id:[0-9]+}/{slug}/{flag}", func(c *web.Context) error {
 		id, err := c.ParamInt("id")
 		if err != nil {
@@ -161,7 +160,7 @@ func TestExplicitRouteParamsTypedValues(t *testing.T) {
 }
 
 func TestTypedParamParseFailureBecomesBadRequest(t *testing.T) {
-	h := web.NewHandler(base.New(config.Default()))
+	h := web.NewHandler(base.New())
 	h.Get("/big/{id:[0-9]+}", func(c *web.Context) error {
 		if _, err := c.ParamInt("id"); err != nil {
 			return web.BadRequest(err.Error())
@@ -178,7 +177,7 @@ func TestTypedParamParseFailureBecomesBadRequest(t *testing.T) {
 }
 
 func TestMethodHelpersAndMethodMismatch(t *testing.T) {
-	h := web.NewHandler(base.New(config.Config{Web: config.Web{DisableCsrf: true}}))
+	h := web.NewHandler(base.New(), web.WithoutCsrf())
 	h.Get("/thing", func(c *web.Context) error { return c.JSON(map[string]string{"m": "get"}) })
 	h.Post("/thing", func(c *web.Context) error { return c.JSON(map[string]string{"m": "post"}) })
 
@@ -202,7 +201,7 @@ func TestMethodHelpersAndMethodMismatch(t *testing.T) {
 }
 
 func TestExplicitRouteVerbMismatch405(t *testing.T) {
-	h := web.NewHandler(base.New(config.Config{Web: config.Web{DisableCsrf: true}}))
+	h := web.NewHandler(base.New(), web.WithoutCsrf())
 	h.Get("/post/{id:[0-9]+}", func(c *web.Context) error {
 		return c.JSON(map[string]string{"m": "get"})
 	})
@@ -235,7 +234,7 @@ func TestNamedRoutesPowerReverseGeneration(t *testing.T) {
 	url.SetDefault(nil)
 	defer url.SetDefault(nil)
 
-	h := web.NewHandler(base.New(config.Default()))
+	h := web.NewHandler(base.New())
 	h.Get("/post/{id:[0-9]+}", func(c *web.Context) error { return nil }).Name("post/view")
 
 	got, err := h.URLs().URL("post/view", url.P{"id": "9"})
@@ -264,7 +263,7 @@ func TestNamedRoutesPowerReverseGeneration(t *testing.T) {
 }
 
 func TestExplicitRouteBeatsConventionFallback(t *testing.T) {
-	app := base.New(config.Default())
+	app := base.New()
 	if err := app.RegisterController("site", siteController{}); err != nil {
 		t.Fatalf("registering controller: %v", err)
 	}
@@ -319,11 +318,11 @@ func TestRootRouteBindsOnlyTheRoot(t *testing.T) {
 }
 
 func TestConventionFallbackDisabled(t *testing.T) {
-	app := base.New(config.Config{Web: config.Web{DisableConventionFallback: true}})
+	app := base.New()
 	if err := app.RegisterController("site", siteController{}); err != nil {
 		t.Fatalf("registering controller: %v", err)
 	}
-	h := web.NewHandler(app)
+	h := web.NewHandler(app, web.WithoutConventionFallback())
 
 	res := do(t, h, "/site/hello", "")
 	if res.StatusCode != http.StatusNotFound {
@@ -375,7 +374,7 @@ func TestConventionRoutesServeAnyMethod(t *testing.T) {
 }
 
 func TestConventionActionSignatureMismatchIsServerError(t *testing.T) {
-	app := base.New(config.Default())
+	app := base.New()
 	if err := app.RegisterController("report", reportController{}); err != nil {
 		t.Fatalf("registering controller: %v", err)
 	}
@@ -388,7 +387,7 @@ func TestConventionActionSignatureMismatchIsServerError(t *testing.T) {
 }
 
 func TestMultiSegmentModulePrefixResolves(t *testing.T) {
-	app := base.New(config.Default())
+	app := base.New()
 	api, err := base.NewModule(app, "/api")
 	if err != nil {
 		t.Fatalf("creating /api module: %v", err)
@@ -486,7 +485,7 @@ func TestModuleScopedExplicitRoutes(t *testing.T) {
 // controller, both reachable through the convention fallback.
 func newNestedApp(t *testing.T) (*web.Handler, *base.Application) {
 	t.Helper()
-	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}})
+	app := base.New()
 	admin, err := base.NewModule(app, "/admin")
 	if err != nil {
 		t.Fatalf("creating /admin module: %v", err)
@@ -507,7 +506,7 @@ func newNestedApp(t *testing.T) (*web.Handler, *base.Application) {
 	if err := report.RegisterController("user", userController{}); err != nil {
 		t.Fatalf("registering /admin/report controller: %v", err)
 	}
-	return web.NewHandler(app), app
+	return web.NewHandler(app, web.WithoutCsrf()), app
 }
 
 // TestNestedModuleConventionResolution pins layered controller lookup along
@@ -613,7 +612,7 @@ func TestNestedModuleExplicitRoutesAndNames(t *testing.T) {
 }
 
 func TestUnmatchedPathsRenderNegotiatedNotFound(t *testing.T) {
-	h := web.NewHandler(base.New(config.Default()))
+	h := web.NewHandler(base.New())
 
 	res := do(t, h, "/nope", "")
 	if res.StatusCode != http.StatusNotFound {

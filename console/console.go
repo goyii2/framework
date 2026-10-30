@@ -21,8 +21,8 @@ const DefaultShutdownTimeout = 10 * time.Second
 // Console is the CLI entry point around one application. It owns the root
 // cobra command ("goyii") with the built-in subcommands and accepts
 // application-defined commands via AddCommand. Constructing it from the same
-// *base.Application as the web handler keeps CLI and web on one config
-// source and one component assembly.
+// *base.Application as the web handler keeps CLI and web on one component
+// assembly.
 type Console struct {
 	app  *base.Application
 	root *cobra.Command
@@ -30,6 +30,10 @@ type Console struct {
 	// handler is the HTTP handler the serve subcommand starts
 	// (see WithHandler).
 	handler http.Handler
+
+	// listenAddr is the address the serve subcommand listens on (see
+	// WithListen).
+	listenAddr string
 
 	// shutdownTimeout bounds serve's graceful shutdown wait.
 	shutdownTimeout time.Duration
@@ -48,6 +52,13 @@ func WithHandler(h http.Handler) Option {
 	return func(c *Console) { c.handler = h }
 }
 
+// WithListen sets the address the serve subcommand listens on — typically
+// the project's web.listen value; the assembly injects it here since the
+// framework owns no configuration. Default ":8080".
+func WithListen(addr string) Option {
+	return func(c *Console) { c.listenAddr = addr }
+}
+
 // WithShutdownTimeout overrides how long serve waits for in-flight requests
 // during graceful shutdown (default DefaultShutdownTimeout).
 func WithShutdownTimeout(d time.Duration) Option {
@@ -59,6 +70,7 @@ func WithShutdownTimeout(d time.Duration) Option {
 func New(app *base.Application, opts ...Option) *Console {
 	c := &Console{
 		app:             app,
+		listenAddr:      ":8080",
 		shutdownTimeout: DefaultShutdownTimeout,
 		listenFn: func(addr string) (net.Listener, error) {
 			return net.Listen("tcp", addr)

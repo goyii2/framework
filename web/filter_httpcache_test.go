@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/goyii2/framework/base"
-	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/web"
 )
 
@@ -18,8 +17,8 @@ var modifiedAt = time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 // httpCacheApp mounts the cache filter over an action recording it ran.
 func httpCacheApp(t *testing.T, cache web.HttpCache, actionRan *bool) *web.Handler {
 	t.Helper()
-	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}})
-	h := web.NewHandler(app)
+	app := base.New()
+	h := web.NewHandler(app, web.WithoutCsrf())
 	h.Use(cache.Middleware())
 	h.Get("/report", func(c *web.Context) error {
 		*actionRan = true

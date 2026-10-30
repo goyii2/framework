@@ -11,7 +11,6 @@ import (
 
 	"github.com/goyii2/framework/base"
 	"github.com/goyii2/framework/cache"
-	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/web"
 )
 
@@ -21,9 +20,9 @@ import (
 func pageCacheApp(t *testing.T, pc web.PageCache, app *base.Application, version *string, runs *int) *web.Handler {
 	t.Helper()
 	if app == nil {
-		app = base.New(config.Config{Web: config.Web{DisableCsrf: true}})
+		app = base.New()
 	}
-	h := web.NewHandler(app)
+	h := web.NewHandler(app, web.WithoutCsrf())
 	h.Use(pc.Middleware())
 	h.Get("/page", func(c *web.Context) error {
 		*runs++
@@ -80,7 +79,7 @@ func TestPageCacheStoresEntryInAppComponentWithTTLAndDependency(t *testing.T) {
 	runs := 0
 	dep := cache.NewTimeDependency(time.Now().Add(time.Hour))
 	recording := &recordingPageCache{Cache: cache.NewMemory(time.Hour)}
-	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}})
+	app := base.New()
 	app.SetCache(recording)
 	h := pageCacheApp(t, web.PageCache{Duration: 2 * time.Minute, Dependency: dep}, app, &version, &runs)
 
@@ -175,7 +174,7 @@ func TestPageCacheVaryBySplitsVariants(t *testing.T) {
 func TestPageCacheSkipsWriteVerbs(t *testing.T) {
 	version := "v1"
 	runs := 0
-	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}})
+	app := base.New()
 	h := pageCacheApp(t, web.PageCache{Duration: time.Minute}, app, &version, &runs)
 	h.Post("/page", func(c *web.Context) error {
 		runs++
@@ -218,8 +217,8 @@ func TestPageCacheSkipsHeadRequests(t *testing.T) {
 
 func TestPageCacheSkipsNonTextResponses(t *testing.T) {
 	runs := 0
-	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}})
-	h := web.NewHandler(app)
+	app := base.New()
+	h := web.NewHandler(app, web.WithoutCsrf())
 	h.Use(web.PageCache{Duration: time.Minute}.Middleware())
 	h.Get("/data", func(c *web.Context) error {
 		runs++
@@ -239,8 +238,8 @@ func TestPageCacheSkipsNonTextResponses(t *testing.T) {
 
 func TestPageCacheSkipsNonSuccessStatuses(t *testing.T) {
 	runs := 0
-	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}})
-	h := web.NewHandler(app)
+	app := base.New()
+	h := web.NewHandler(app, web.WithoutCsrf())
 	h.Use(web.PageCache{Duration: time.Minute}.Middleware())
 	h.Get("/gone", func(c *web.Context) error {
 		runs++
@@ -272,8 +271,8 @@ func TestPageCacheSkipsNonSuccessStatuses(t *testing.T) {
 
 func TestPageCacheSkipsFlushedResponses(t *testing.T) {
 	runs := 0
-	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}})
-	h := web.NewHandler(app)
+	app := base.New()
+	h := web.NewHandler(app, web.WithoutCsrf())
 	h.Use(web.PageCache{Duration: time.Minute}.Middleware())
 	h.Get("/page", func(c *web.Context) error {
 		runs++
@@ -303,7 +302,7 @@ func TestPageCacheSkipsFlushedResponses(t *testing.T) {
 func TestPageCacheBackendFailureServesUncached(t *testing.T) {
 	version := "v1"
 	runs := 0
-	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}})
+	app := base.New()
 	app.SetCache(&failingPageCache{runBuild: false})
 	h := pageCacheApp(t, web.PageCache{Duration: time.Minute}, app, &version, &runs)
 
@@ -325,8 +324,8 @@ func TestPageCacheBackendFailureServesUncached(t *testing.T) {
 func TestPageCacheMountedAsControllerMiddleware(t *testing.T) {
 	version := "v1"
 	runs := 0
-	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}})
-	h := web.NewHandler(app)
+	app := base.New()
+	h := web.NewHandler(app, web.WithoutCsrf())
 	ctrl := &cachedPageController{version: &version, runs: &runs}
 	h.Ctrl(ctrl).Get("/cached", ctrl.ActionView)
 

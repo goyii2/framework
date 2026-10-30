@@ -12,7 +12,6 @@ import (
 	z "github.com/Oudwins/zog"
 
 	"github.com/goyii2/framework/base"
-	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/db"
 	"github.com/goyii2/framework/db/ar"
 	"github.com/goyii2/framework/validators"
@@ -88,9 +87,9 @@ func newValidationApp(t *testing.T) (*web.Handler, *base.Application) {
 	}
 	// A pure JSON API endpoint: CSRF cookie validation is off (the exact
 	// configuration switch this application shape is meant to use).
-	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}})
+	app := base.New()
 	app.SetDB(conn)
-	handler := web.NewHandler(app)
+	handler := web.NewHandler(app, web.WithoutCsrf())
 	handler.Post("/user", userController{}.ActionCreate)
 	return handler, app
 }

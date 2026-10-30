@@ -204,10 +204,7 @@ func (pc *PostController) ActionDelete(c *web.Context) error {
 // on. A production table would use a version counter or max(updated_at)
 // instead — anything that moves when the data does.
 func postMaxID(ctx context.Context) int64 {
-	conn, err := base.FromContext(ctx).DB()
-	if err != nil {
-		return -1
-	}
+	conn := base.FromContext(ctx).DB()
 	var maxID int64
 	if err := conn.Raw("SELECT COALESCE(MAX(id), 0) FROM post").Scan(&maxID).Error; err != nil {
 		return -1

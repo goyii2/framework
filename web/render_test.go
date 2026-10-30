@@ -10,7 +10,6 @@ import (
 
 	"github.com/a-h/templ"
 	"github.com/goyii2/framework/base"
-	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/view"
 	"github.com/goyii2/framework/web"
 )
@@ -42,7 +41,7 @@ func body(t *testing.T, res *http.Response) string {
 // its own layout, and error-producing actions.
 func newRenderApp(t *testing.T) *web.Handler {
 	t.Helper()
-	app := base.New(config.Default())
+	app := base.New()
 	h := web.NewHandler(app)
 
 	h.Views().Register("page/hello", view.Typed(func(data renderViewData) templ.Component {

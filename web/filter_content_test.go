@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/goyii2/framework/base"
-	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/web"
 )
 
@@ -17,8 +16,8 @@ import (
 // rendering must follow the negotiated format, POST /data accepts JSON.
 func contentApp(t *testing.T, neg web.ContentNegotiator) *web.Handler {
 	t.Helper()
-	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}})
-	h := web.NewHandler(app)
+	app := base.New()
+	h := web.NewHandler(app, web.WithoutCsrf())
 	h.Use(neg.Middleware())
 	h.Get("/data", func(c *web.Context) error {
 		return c.JSON(map[string]string{"format": c.ResponseFormat()})

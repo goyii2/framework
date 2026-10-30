@@ -13,7 +13,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/goyii2/framework/base"
-	"github.com/goyii2/framework/config"
+	"github.com/goyii2/framework/db"
+	"github.com/goyii2/framework/log"
 	"github.com/goyii2/framework/migrate"
 	"github.com/goyii2/framework/queue"
 )
@@ -46,20 +47,16 @@ var (
 
 // newTestConsole builds a "goyii" root command carrying the queue command
 // tree over a sqlite-backed application with the queue table applied and the
-// test jobs registered.
+// test jobs registered — the assembly an application entry performs.
 func newTestConsole(t *testing.T) (*cobra.Command, *base.Application) {
 	t.Helper()
 	dsn := filepath.Join(t.TempDir(), "queue.db")
-	app := base.New(config.Config{
-		App:   config.App{Name: "queuedemo"},
-		DB:    config.DB{Driver: "sqlite", DSN: dsn},
-		Queue: config.Queue{Driver: "db", TableName: "queue", PollIntervalMs: 5},
-	})
-
-	conn, err := app.DB()
-	if err != nil {
+	app := base.New()
+	if err := app.ConnectDB(db.Config{Driver: "sqlite", DSN: dsn}, log.GormConfig{Disable: true}); err != nil {
 		t.Fatalf("open db: %v", err)
 	}
+
+	conn := app.DB()
 	t.Cleanup(func() { _ = conn.Close() }) // release the file before TempDir cleanup
 	sqlDB, err := conn.DB.DB()
 	if err != nil {
@@ -72,6 +69,13 @@ func newTestConsole(t *testing.T) (*cobra.Command, *base.Application) {
 	if err := queue.NewMigration("").Up(context.Background(), migrate.NewMigrationContext(sqlDB, dialect)); err != nil {
 		t.Fatalf("apply queue migration: %v", err)
 	}
+
+	q, err := queue.New(queue.Config{Driver: "db", TableName: "queue", PollIntervalMs: 5},
+		queue.WithDB(conn), app.QueueDispatcher())
+	if err != nil {
+		t.Fatalf("queue.New(db): %v", err)
+	}
+	app.SetQueue(q)
 
 	for _, job := range []queue.Job{&cmdJob{}, &failingJob{}} {
 		if err := app.Queue().Jobs().Register(job); err != nil {
@@ -184,10 +188,7 @@ func TestRunUnknownJobFailsTheMessageNotTheCommand(t *testing.T) {
 
 	// Push a "ghost" message through a second queue over the same table: the
 	// application's registry does not know the name.
-	conn, err := app.DB()
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
+	conn := app.DB()
 	ghostReg, err := queue.NewRegistry(&namedTestJob{name: "ghost"})
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)

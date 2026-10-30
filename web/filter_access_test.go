@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/goyii2/framework/base"
-	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/web"
 )
 
@@ -140,8 +139,8 @@ func (customRoleController) ActionBook(c *web.Context) error {
 // accessApp mounts every access-control shape under its own prefix.
 func accessApp(t *testing.T) *web.Handler {
 	t.Helper()
-	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}})
-	h := web.NewHandler(app)
+	app := base.New()
+	h := web.NewHandler(app, web.WithoutCsrf())
 	h.Ctrl(adminController{}).Post("/admin/purge", adminController{}.ActionPurge)
 	h.Ctrl(editorController{}).Get("/editor/draft", editorController{}.ActionDraft)
 	h.Ctrl(signoffController{}).Get("/report/view", signoffController{}.ActionView)
@@ -227,9 +226,9 @@ func TestAccessControlGuestRequests(t *testing.T) {
 func TestAccessControlSessionLoginSatisfiesSpecialRoles(t *testing.T) {
 	// Authentication arrives through the session, not a credential header:
 	// the special roles must see session logins exactly like transient ones.
-	cfg := fileSessionConfig(t)
-	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}, Session: cfg})
-	h := web.NewHandler(app)
+	app := base.New()
+	app.SetSession(fileSessionManager(t))
+	h := web.NewHandler(app, web.WithoutCsrf())
 	h.SessionManager().IdentityFinder = func(id string) (web.Identity, bool) {
 		if id == alice.GetID() {
 			return alice, true

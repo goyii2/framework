@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/goyii2/framework/base"
+	"github.com/goyii2/framework/session"
 	"github.com/goyii2/framework/url"
 	"github.com/goyii2/framework/view"
 )
@@ -15,7 +16,7 @@ import (
 //
 //	h := web.NewHandler(app)
 //	h.Get("/post/{id:[0-9]+}", postCtrl.ActionView).Name("post/view")
-//	http.ListenAndServe(app.Config().Web.Listen, h)
+//	http.ListenAndServe(":8080", h)
 //
 // Per request the pipeline is: trigger EventBeforeRequest, run the global
 // middleware chain around routing, dispatch to the mounted action with a
@@ -40,19 +41,23 @@ type Handler struct {
 	// paths no explicit route matched; on by default, configurable off.
 	conventionFallback bool
 
-	// session is the session manager installed in the global chain; exposed
-	// for configuration (most notably wiring IdentityFinder) before serving
-	// traffic.
-	session *SessionManager
+	// session is the session manager installed in the global chain — the
+	// application's session component; exposed for configuration (most
+	// notably wiring IdentityFinder) before serving traffic.
+	session *session.Manager
 
 	// auth is the authorization backend (AccessChecker) the request pipeline
 	// consults; installed through SetAuthManager before serving traffic.
 	auth AccessChecker
 
+	// csrf enables the CSRF validation middleware in the global chain (on
+	// by default; pure API applications switch it off with WithoutCsrf).
+	csrf bool
+
 	// chain holds the application-wide middleware, first registered
 	// outermost (first to see each request); pipe is the mux wrapped by it.
-	// The chain starts with the CSRF middleware unless configuration
-	// disables it.
+	// The chain starts with the CSRF middleware unless an option disabled
+	// it.
 	chain []Middleware
 	pipe  http.Handler
 
@@ -69,43 +74,63 @@ type Handler struct {
 	moduleMW map[*base.Module][]Middleware
 }
 
-// NewHandler creates the HTTP entry point serving app. The convention
-// fallback follows the application configuration (on unless explicitly
-// disabled) and can be flipped later with SetConventionFallback. CSRF
-// validation and the session middleware are installed in the global chain
-// unless the configuration disables them (see Csrf and SessionManager).
-func NewHandler(app *base.Application) *Handler {
+// HandlerOption configures the HTTP entry point at construction time.
+type HandlerOption func(*Handler)
+
+// WithoutCsrf leaves the CSRF validation middleware out of the global chain
+// — for pure API applications that authenticate every request (token or
+// bearer); form-facing applications keep the default (double-submit cookie
+// validation installed).
+func WithoutCsrf() HandlerOption {
+	return func(h *Handler) { h.csrf = false }
+}
+
+// WithoutConventionFallback turns off /{controller}/{action} resolution for
+// paths no explicit route matched — for applications that bind every route
+// explicitly; a miss then renders a negotiated 404.
+func WithoutConventionFallback() HandlerOption {
+	return func(h *Handler) { h.conventionFallback = false }
+}
+
+// NewHandler creates the HTTP entry point serving app. The session manager
+// comes from the application's session component, and the convention
+// fallback and CSRF validation are installed by default — the WithoutCsrf /
+// WithoutConventionFallback options switch either off, and
+// SetConventionFallback still toggles the fallback later. Configure the
+// session manager (cookie attributes, IdentityFinder) through
+// SessionManager before serving traffic.
+func NewHandler(app *base.Application, opts ...HandlerOption) *Handler {
 	h := &Handler{
 		app:                app,
 		mux:                http.NewServeMux(),
 		urls:               url.NewManager(),
 		views:              view.NewRegistry(),
-		conventionFallback: !app.Config().Web.DisableConventionFallback,
+		conventionFallback: true,
+		csrf:               true,
 		verbBindings:       map[string]*verbBinding{},
 		moduleMW:           map[*base.Module][]Middleware{},
+		session:            app.Session(),
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(h)
+		}
 	}
 	h.rebuildPipe()
-	if sc := app.Config().Session; sc.Backend == "redis" {
-		// A session section without redis values inherits the top-level
-		// section and shares the application's connection; a non-empty one
-		// resolves to a dedicated connection (see Application.RedisFor).
-		h.session = NewSessionManagerWithRedis(sc, app.RedisFor(sc.Redis))
-	} else {
-		h.session = NewSessionManager(sc)
-	}
-	h.Use(h.session.Middleware())
+	h.Use(sessionMiddleware(h.session))
 	h.Use(Language())
-	if !app.Config().Web.DisableCsrf {
+	if h.csrf {
 		h.Use(Csrf{}.Middleware())
 	}
 	h.mountFallback()
 	return h
 }
 
-// SessionManager returns the session manager installed in the global chain.
-// Configure it (backend, cookie attributes, IdentityFinder) before serving
-// traffic; mutations during serving are not synchronized.
-func (h *Handler) SessionManager() *SessionManager { return h.session }
+// SessionManager returns the session manager installed in the global chain
+// — the application's session component. Configure it (cookie attributes,
+// IdentityFinder) before serving traffic; mutations during serving are not
+// synchronized.
+func (h *Handler) SessionManager() *session.Manager { return h.session }
 
 // SetAuthManager installs the authorization backend the request pipeline
 // consults: with it, User.Can and AccessControl rules check roles and

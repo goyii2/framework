@@ -15,8 +15,8 @@ import (
 	z "github.com/Oudwins/zog"
 
 	"github.com/goyii2/framework/base"
-	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/i18n"
+	"github.com/goyii2/framework/session"
 	"github.com/goyii2/framework/validators"
 	"github.com/goyii2/framework/web"
 )
@@ -68,13 +68,14 @@ func (f *form) Rules() validators.RuleSet {
 // to the session, and validation errors arrive translated in the
 // field -> []messages shape.
 func TestEmbeddedSourceServesTheRequestPipeline(t *testing.T) {
-	app := base.New(config.Config{
-		App:     config.App{Name: "i18n-test"},
-		Web:     config.Web{DisableCsrf: true},
-		Session: config.Session{Path: t.TempDir()},
-	})
+	app := base.New(base.WithApp("i18n-test", "", false))
+	sess, err := session.New(session.Config{Path: t.TempDir()})
+	if err != nil {
+		t.Fatalf("session.New: %v", err)
+	}
+	app.SetSession(sess)
 	app.SetI18n(embeddedSource(t))
-	handler := web.NewHandler(app)
+	handler := web.NewHandler(app, web.WithoutCsrf())
 
 	handler.Get("/hello", func(c *web.Context) error {
 		msg := i18n.T(c.Context(), "app", "Hello, {name}!", map[string]any{"name": "Ada"})
@@ -169,11 +170,11 @@ func TestEmbeddedSourceServesTheRequestPipeline(t *testing.T) {
 	}
 
 	// Errors.As compatibility of the translated result stays intact.
-	err := error(validators.Validate(i18n.WithLanguage(
+	asErr := error(validators.Validate(i18n.WithLanguage(
 		i18n.WithSource(context.Background(), embeddedSource(t)), "zh-CN"),
 		&form{}, validators.ScenarioInsert))
 	var verrs *validators.Errors
-	if !errors.As(err, &verrs) {
+	if !errors.As(asErr, &verrs) {
 		t.Fatal("translated failure does not unwrap to *validators.Errors")
 	}
 }

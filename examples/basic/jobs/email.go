@@ -29,12 +29,16 @@ type EmailJob struct {
 // Name is the registry key the worker resolves pushed messages by.
 func (j *EmailJob) Name() string { return "email" }
 
+// defaultFrom is the sender the demo messages carry; it matches the
+// project's mail.from value (assembly in main.go).
+const defaultFrom = "goyii basic <no-reply@goyii.example>"
+
 // Execute delivers the message through the application the worker context
 // carries.
 func (j *EmailJob) Execute(ctx context.Context) error {
 	app := base.FromContext(ctx)
 	msg := mail.NewMessage().
-		SetFrom(app.Config().Mail.From).
+		SetFrom(defaultFrom).
 		SetTo(j.To).
 		SetSubject(j.Subject).
 		SetTextBody(j.Body)
@@ -63,11 +67,7 @@ const (
 // what the visitor sees is what a worker would find.
 func ReadQueueStatus(ctx context.Context) (Status, error) {
 	var s Status
-	app := base.FromContext(ctx)
-	conn, err := app.DB()
-	if err != nil {
-		return s, err
-	}
+	conn := base.FromContext(ctx).DB()
 	rows := []struct {
 		Status int   `gorm:"column:status"`
 		Count  int64 `gorm:"column:count"`

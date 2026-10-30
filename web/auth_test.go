@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/goyii2/framework/base"
-	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/web"
 )
 
@@ -65,8 +64,8 @@ func (bearerController) ActionOrders(c *web.Context) error {
 // controllers' actions only.
 func authApp(t *testing.T) *web.Handler {
 	t.Helper()
-	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}})
-	h := web.NewHandler(app)
+	app := base.New()
+	h := web.NewHandler(app, web.WithoutCsrf())
 	h.Ctrl(basicController{}).Get("/basic/profile", basicController{}.ActionProfile)
 	h.Ctrl(bearerController{}).Get("/api/orders", bearerController{}.ActionOrders)
 	h.Get("/public/ping", func(c *web.Context) error {
@@ -222,8 +221,8 @@ func TestHttpBearerCustomValidatorSeam(t *testing.T) {
 	// Applications resolve tokens their own way: a custom validator replaces
 	// the static table without the middleware changing.
 	var seen string
-	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}})
-	h := web.NewHandler(app)
+	app := base.New()
+	h := web.NewHandler(app, web.WithoutCsrf())
 	h.Use(web.HttpBearer{
 		Authenticate: func(token string) (web.Identity, bool) {
 			seen = token

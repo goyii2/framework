@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"sync"
+
+	"github.com/goyii2/framework/session"
 )
 
 // errLoginRequiresIdentity and errLoginRequiresSession are the two ways
@@ -26,8 +28,8 @@ const sessionKeyIdentityID = "__id"
 // (the AccessChecker wired on the handler) what the identity holds.
 // Reach it through Context.User.
 type User struct {
-	mgr     *SessionManager
-	session *Session
+	mgr     *session.Manager
+	session *session.Session
 	// checker is the authorization backend Can consults; installed from the
 	// request Context when the User is created.
 	checker AccessChecker
@@ -39,7 +41,7 @@ type User struct {
 
 // newUser builds the request User bound to its session and authorization
 // backend.
-func newUser(mgr *SessionManager, session *Session, checker AccessChecker) *User {
+func newUser(mgr *session.Manager, session *session.Session, checker AccessChecker) *User {
 	return &User{mgr: mgr, session: session, checker: checker}
 }
 

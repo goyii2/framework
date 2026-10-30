@@ -104,7 +104,7 @@ func (h *Handler) renderError(c *Context, err error) {
 	var he HTTPError
 	if errors.As(err, &he) {
 		status, message = he.Status(), he.Message()
-	} else if h.app.Config().App.Debug {
+	} else if h.app.Debug() {
 		message = err.Error()
 	}
 	if message == "" {

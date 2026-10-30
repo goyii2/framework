@@ -13,7 +13,6 @@ import (
 	"testing"
 
 	"github.com/goyii2/framework/base"
-	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/web"
 )
 
@@ -57,8 +56,8 @@ func (postController) ActionProbe(c *web.Context) error {
 var seenApp = map[string]any{}
 
 // newTestApp assembles the handler with all example actions mounted.
-func newTestApp(cfg config.Config) (*web.Handler, *base.Application) {
-	app := base.New(cfg)
+func newTestApp(opts ...base.Option) (*web.Handler, *base.Application) {
+	app := base.New(opts...)
 	h := web.NewHandler(app)
 	ctrl := postController{}
 	h.Handle("GET /post/view", ctrl.ActionView)
@@ -84,7 +83,7 @@ func do(t *testing.T, h http.Handler, target, accept string) *http.Response {
 }
 
 func TestJSONActionReturnsJSON(t *testing.T) {
-	h, _ := newTestApp(config.Default())
+	h, _ := newTestApp()
 
 	res := do(t, h, "/post/view", "")
 	if res.StatusCode != http.StatusOK {
@@ -103,7 +102,7 @@ func TestJSONActionReturnsJSON(t *testing.T) {
 }
 
 func TestRedirectAction(t *testing.T) {
-	h, _ := newTestApp(config.Default())
+	h, _ := newTestApp()
 
 	res := do(t, h, "/post/archive", "")
 	if res.StatusCode != http.StatusFound {
@@ -115,7 +114,7 @@ func TestRedirectAction(t *testing.T) {
 }
 
 func TestActionSeesApplicationAndWebContext(t *testing.T) {
-	h, app := newTestApp(config.Default())
+	h, app := newTestApp()
 	clear(seenApp)
 
 	res := do(t, h, "/probe", "")
@@ -131,7 +130,7 @@ func TestActionSeesApplicationAndWebContext(t *testing.T) {
 }
 
 func TestNotFoundRendersJSONByDefault(t *testing.T) {
-	h, _ := newTestApp(config.Default())
+	h, _ := newTestApp()
 
 	res := do(t, h, "/post/missing", "")
 	if res.StatusCode != http.StatusNotFound {
@@ -150,7 +149,7 @@ func TestNotFoundRendersJSONByDefault(t *testing.T) {
 }
 
 func TestForbiddenRendersHTMLWhenPreferred(t *testing.T) {
-	h, _ := newTestApp(config.Default())
+	h, _ := newTestApp()
 
 	res := do(t, h, "/post/secret", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 	if res.StatusCode != http.StatusForbidden {
@@ -167,7 +166,7 @@ func TestForbiddenRendersHTMLWhenPreferred(t *testing.T) {
 }
 
 func TestExplicitJSONAcceptRendersJSONError(t *testing.T) {
-	h, _ := newTestApp(config.Default())
+	h, _ := newTestApp()
 
 	res := do(t, h, "/post/missing", "application/json")
 	if res.StatusCode != http.StatusNotFound {
@@ -179,7 +178,7 @@ func TestExplicitJSONAcceptRendersJSONError(t *testing.T) {
 }
 
 func TestPlainErrorIs500WithoutInternals(t *testing.T) {
-	h, _ := newTestApp(config.Default())
+	h, _ := newTestApp()
 
 	res := do(t, h, "/post/crash", "application/json")
 	if res.StatusCode != http.StatusInternalServerError {
@@ -195,7 +194,7 @@ func TestPlainErrorIs500WithoutInternals(t *testing.T) {
 }
 
 func TestPlainErrorRevealsTextInDebugMode(t *testing.T) {
-	h, _ := newTestApp(config.Config{App: config.App{Debug: true}})
+	h, _ := newTestApp(base.WithApp("test", "dev", true))
 
 	res := do(t, h, "/post/crash", "application/json")
 	if res.StatusCode != http.StatusInternalServerError {
@@ -211,7 +210,7 @@ func TestPlainErrorRevealsTextInDebugMode(t *testing.T) {
 }
 
 func TestPanicRecoveredAs500AndEventsStillFire(t *testing.T) {
-	h, app := newTestApp(config.Default())
+	h, app := newTestApp()
 
 	var mu sync.Mutex
 	var order []string
@@ -241,7 +240,7 @@ func TestPanicRecoveredAs500AndEventsStillFire(t *testing.T) {
 }
 
 func TestErrorAfterPartialWriteKeepsFirstResponse(t *testing.T) {
-	h, _ := newTestApp(config.Default())
+	h, _ := newTestApp()
 
 	res := do(t, h, "/post/half", "")
 	if res.StatusCode != http.StatusOK {
@@ -257,7 +256,7 @@ func TestErrorAfterPartialWriteKeepsFirstResponse(t *testing.T) {
 }
 
 func TestRequestEventsFireInOrder(t *testing.T) {
-	h, app := newTestApp(config.Default())
+	h, app := newTestApp()
 
 	var order []string
 	app.On(base.EventBeforeRequest, func(ctx context.Context, e base.Event) {
@@ -288,7 +287,7 @@ func TestRequestEventsFireInOrder(t *testing.T) {
 }
 
 func TestRealServerServesJSONOverTCP(t *testing.T) {
-	h, app := newTestApp(config.Default())
+	h, app := newTestApp()
 
 	var mu sync.Mutex
 	var fired []string

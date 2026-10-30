@@ -6,8 +6,8 @@
 //	console.AddCommand(queuecommands.New(app))
 //
 // The commands resolve the queue through the application component
-// (app.Queue), so the driver, table and poll interval follow the queue
-// configuration section, and jobs resolve through the component's registry —
+// (app.Queue), so the driver and its values are whatever the application
+// entry installed, and jobs resolve through the component's registry —
 // applications register their jobs before the console runs:
 //
 //	app.Queue().Jobs().Register(&emailJob{}, &reportJob{})
@@ -55,7 +55,7 @@ func newListenCommand(app *base.Application) *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx, stop := workerContext(cmd.Context())
 			defer stop()
-			app.Log().Info("queue worker listening", "driver", app.Config().Queue.Driver)
+			app.Log().Info("queue worker listening", "driver", fmt.Sprintf("%T", app.Queue().Driver()))
 			err := app.Queue().Listen(ctx)
 			app.Log().Info("queue worker stopped")
 			return err

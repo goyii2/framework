@@ -1,6 +1,6 @@
 // Package debug provides the development-time request introspection tool:
 // a middleware that aggregates what one request did (routing, logs, SQL,
-// timeline, session, configuration, mail) into a per-request JSON record on
+// timeline, session, mail) into a per-request JSON record on
 // disk, and embedded /debug pages to browse that history — plus a toolbar
 // injected into successful HTML responses linking each page to its own
 // record. Everything mounts only when the application runs with debug on.
@@ -9,16 +9,14 @@ package debug
 import (
 	"log/slog"
 	"strconv"
-	"strings"
 	"time"
 
-	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/db"
 	"github.com/goyii2/framework/log"
 	"github.com/goyii2/framework/web"
 )
 
-// Entry is one request's collected data: the seven panels the detail page
+// Entry is one request's collected data: the six panels the detail page
 // shows, written as a single JSON file per request.
 type Entry struct {
 	ID       string         `json:"id"`
@@ -29,7 +27,6 @@ type Entry struct {
 	Timeline []TimelineItem `json:"timeline"`
 	Session  *SessionInfo   `json:"session,omitempty"`
 	User     *UserInfo      `json:"user,omitempty"`
-	Config   ConfigSummary  `json:"config"`
 	Mail     []MailInfo     `json:"mail"`
 }
 
@@ -223,153 +220,6 @@ func attrFloat(rec log.Record, key string) float64 {
 		}
 	}
 	return 0
-}
-
-// masked is what every secret renders as; an empty secret stays empty so a
-// missing value is distinguishable from a set one.
-const masked = "***"
-
-// ConfigSummary is the configuration panel: the component choices the
-// application runs with, secrets masked (DSN and stored passwords never
-// reach the page).
-type ConfigSummary struct {
-	App struct {
-		Name     string `json:"name"`
-		Env      string `json:"env"`
-		Language string `json:"language"`
-		Debug    bool   `json:"debug"`
-	} `json:"app"`
-	Web struct {
-		Listen string `json:"listen"`
-	} `json:"web"`
-	DB struct {
-		Driver string `json:"driver"`
-		DSN    string `json:"dsn"`
-	} `json:"db"`
-	Redis struct {
-		Addr     string `json:"addr"`
-		DB       int    `json:"db"`
-		Password string `json:"password"`
-	} `json:"redis"`
-	Cache struct {
-		Driver string `json:"driver"`
-	} `json:"cache"`
-	Session struct {
-		Backend string `json:"backend"`
-	} `json:"session"`
-	Queue struct {
-		Driver string `json:"driver"`
-	} `json:"queue"`
-	Log struct {
-		Level   string   `json:"level"`
-		Targets []string `json:"targets"`
-	} `json:"log"`
-	Mail struct {
-		Driver string `json:"driver"`
-		From   string `json:"from"`
-		SMTP   struct {
-			Host     string `json:"host"`
-			Port     int    `json:"port"`
-			Username string `json:"username"`
-			Password string `json:"password"`
-		} `json:"smtp"`
-	} `json:"mail"`
-}
-
-// summarizeConfig builds the configuration panel from the application
-// configuration, masking every secret: the DSN's credentials and the redis
-// and SMTP passwords.
-func summarizeConfig(cfg config.Config) ConfigSummary {
-	var s ConfigSummary
-	s.App.Name, s.App.Env, s.App.Language, s.App.Debug = cfg.App.Name, cfg.Env, cfg.App.Language, cfg.App.Debug
-	s.Web.Listen = cfg.Web.Listen
-	s.DB.Driver, s.DB.DSN = cfg.DB.Driver, maskDSN(cfg.DB.DSN)
-	s.Redis.Addr, s.Redis.DB = cfg.Redis.Addr, cfg.Redis.DB
-	s.Redis.Password = maskValue(cfg.Redis.Password)
-	s.Cache.Driver = cfg.Cache.Driver
-	s.Session.Backend = cfg.Session.Backend
-	s.Queue.Driver = cfg.Queue.Driver
-	s.Log.Level = cfg.Log.Level
-	for _, t := range cfg.Log.Targets {
-		s.Log.Targets = append(s.Log.Targets, t.Type)
-	}
-	s.Mail.Driver, s.Mail.From = cfg.Mail.Driver, cfg.Mail.From
-	s.Mail.SMTP.Host, s.Mail.SMTP.Port, s.Mail.SMTP.Username = cfg.Mail.SMTP.Host, cfg.Mail.SMTP.Port, cfg.Mail.SMTP.Username
-	s.Mail.SMTP.Password = maskValue(cfg.Mail.SMTP.Password)
-	return s
-}
-
-// maskValue renders a stored secret: set values become the mask, empty ones
-// stay empty.
-func maskValue(v string) string {
-	if v == "" {
-		return ""
-	}
-	return masked
-}
-
-// maskDSN hides a DSN's credentials while keeping its shape: URL-style DSNs
-// (postgres://user:pass@host/db), MySQL-style DSNs (user:pass@tcp(host)/db)
-// and key=value DSNs (SQL Server: "user id=sa;password=secret;server=host")
-// all keep everything but the password.
-func maskDSN(dsn string) string {
-	if dsn == "" {
-		return ""
-	}
-	// key=value style first: mask the password pair's value up to the next
-	// ";" (or the end).
-	if i := kvPasswordValueStart(dsn); i >= 0 {
-		return dsn[:i] + masked + kvRest(dsn[i:])
-	}
-	// Credential style: a username (optionally ":password") sits between the
-	// scheme separator and the first "@". Everything between the colon and
-	// the "@" is the password.
-	if at := strings.IndexByte(dsn, '@'); at > 0 {
-		head := dsn[:at]
-		credsStart := strings.LastIndexByte(head, '/') + 1
-		if colon := strings.IndexByte(head[credsStart:], ':'); colon >= 0 {
-			colon += credsStart
-			return dsn[:colon+1] + masked + dsn[at:]
-		}
-	}
-	return dsn
-}
-
-// kvPasswordValueStart finds where a "password=..." pair's value starts in a
-// key=value DSN, or -1 when there is none.
-func kvPasswordValueStart(dsn string) int {
-	lower := strings.ToLower(dsn)
-	offset := 0
-	for {
-		i := strings.Index(lower[offset:], "password")
-		if i < 0 {
-			return -1
-		}
-		i += offset
-		after := dsn[i+len("password"):]
-		j := 0
-		for j < len(after) && (after[j] == ' ' || after[j] == '\t') {
-			j++
-		}
-		if j < len(after) && after[j] == '=' {
-			k := j + 1
-			for k < len(after) && (after[k] == ' ' || after[k] == '\t') {
-				k++
-			}
-			return i + len("password") + k
-		}
-		// "password" was part of another key; keep scanning past it.
-		offset = i + len("password")
-	}
-}
-
-// kvRest returns the value run's remainder — everything from the next ";"
-// on, or nothing when the pair ends the DSN.
-func kvRest(fromValueStart string) string {
-	if i := strings.IndexByte(fromValueStart, ';'); i >= 0 {
-		return fromValueStart[i:]
-	}
-	return ""
 }
 
 // formatDurationMs renders fractional milliseconds for page display.

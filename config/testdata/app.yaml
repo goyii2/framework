@@ -1,7 +1,5 @@
 app:
   name: demo
-  language: en-US
-  timezone: Asia/Shanghai
   debug: false
 web:
   listen: 127.0.0.1:9000
@@ -18,5 +16,8 @@ log:
   level: info
 session:
   name: DEMOSID
-  backend: redis
+  backend: file
   timeout: 3600
+email:
+  apiKey: base-key
+  retries: 3

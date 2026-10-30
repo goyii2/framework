@@ -269,10 +269,7 @@ func TestUseConnBypassesApplication(t *testing.T) {
 	ctx := newTestContext(t)
 	seedUsers(t, ctx, "a", "b", "c")
 
-	conn, err := base.FromContext(ctx).DB()
-	if err != nil {
-		t.Fatalf("app DB: %v", err)
-	}
+	conn := base.FromContext(ctx).DB()
 	bare := UseConn(context.Background(), conn)
 	if n, err := New[user](bare).Count(); err != nil || n != 3 {
 		t.Errorf("Count via UseConn = %d (err %v), want 3", n, err)

@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/goyii2/framework/base"
-	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/db"
 )
 
@@ -65,7 +64,7 @@ func newTestContext(t *testing.T) context.Context {
 			t.Fatalf("create table: %v", err)
 		}
 	}
-	app := base.New(config.Config{})
+	app := base.New()
 	app.SetDB(conn)
 	return app.WithContext(context.Background())
 }
@@ -86,9 +85,6 @@ func seedUsers(t *testing.T, ctx context.Context, names ...string) {
 // session and, with a one-connection pool, would deadlock against the open
 // transaction.
 func exec(ctx context.Context, query string, args ...any) error {
-	conn, err := base.FromContext(ctx).DB()
-	if err != nil {
-		return err
-	}
+	conn := base.FromContext(ctx).DB()
 	return conn.Exec(query, args...).Error
 }

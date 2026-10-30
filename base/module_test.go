@@ -4,15 +4,13 @@ import (
 	"errors"
 	"sync"
 	"testing"
-
-	"github.com/goyii2/framework/config"
 )
 
 // fakeController stands in for web-layer controller instances.
 type fakeController struct{ name string }
 
 func TestNewModuleValidatesPrefix(t *testing.T) {
-	app := New(config.Default())
+	app := New()
 
 	ok := map[string]string{
 		"/admin":  "/admin",
@@ -36,7 +34,7 @@ func TestNewModuleValidatesPrefix(t *testing.T) {
 }
 
 func TestModuleResolvesThroughOwningApplication(t *testing.T) {
-	app := New(config.Default())
+	app := New()
 	m, err := NewModule(app, "/admin")
 	if err != nil {
 		t.Fatalf("NewModule unexpected error: %v", err)
@@ -47,7 +45,7 @@ func TestModuleResolvesThroughOwningApplication(t *testing.T) {
 }
 
 func TestModuleRegistersControllerOwnership(t *testing.T) {
-	app := New(config.Default())
+	app := New()
 	m, _ := NewModule(app, "/admin")
 
 	users := &fakeController{name: "user"}
@@ -73,7 +71,7 @@ func TestModuleRegistersControllerOwnership(t *testing.T) {
 }
 
 func TestModuleRegisterControllerValidation(t *testing.T) {
-	app := New(config.Default())
+	app := New()
 	m, _ := NewModule(app, "/admin")
 
 	if err := m.RegisterController("user", &fakeController{}); err != nil {
@@ -90,7 +88,7 @@ func TestModuleRegisterControllerValidation(t *testing.T) {
 }
 
 func TestApplicationModuleRegistry(t *testing.T) {
-	app := New(config.Default())
+	app := New()
 	admin, _ := NewModule(app, "/admin")
 	blog, _ := NewModule(app, "/blog")
 	if err := app.RegisterModule(admin); err != nil {
@@ -116,7 +114,7 @@ func TestApplicationModuleRegistry(t *testing.T) {
 	if err := app.RegisterModule(dup); !errors.Is(err, ErrDuplicateModulePrefix) {
 		t.Errorf("duplicate prefix error = %v, want ErrDuplicateModulePrefix", err)
 	}
-	foreign, _ := NewModule(New(config.Default()), "/other")
+	foreign, _ := NewModule(New(), "/other")
 	if err := app.RegisterModule(foreign); !errors.Is(err, ErrForeignModule) {
 		t.Errorf("foreign module error = %v, want ErrForeignModule", err)
 	}
@@ -130,7 +128,7 @@ func TestApplicationModuleRegistry(t *testing.T) {
 // resolves its full prefix) and in the parent's child list, with the parent
 // link walkable.
 func TestModuleNestingRegistersChild(t *testing.T) {
-	app := New(config.Default())
+	app := New()
 	admin, _ := NewModule(app, "/admin")
 	if err := app.RegisterModule(admin); err != nil {
 		t.Fatalf("registering parent: %v", err)
@@ -173,7 +171,7 @@ func TestModuleNestingRegistersChild(t *testing.T) {
 // nil and foreign modules, prefixes unrelated to or deeper than the parent,
 // and prefixes already taken anywhere in the application.
 func TestModuleNestingRejectedPairs(t *testing.T) {
-	app := New(config.Default())
+	app := New()
 	admin, _ := NewModule(app, "/admin")
 	if err := app.RegisterModule(admin); err != nil {
 		t.Fatalf("registering parent: %v", err)
@@ -182,7 +180,7 @@ func TestModuleNestingRejectedPairs(t *testing.T) {
 	if err := admin.RegisterModule(nil); !errors.Is(err, ErrNilModule) {
 		t.Errorf("nil child error = %v, want ErrNilModule", err)
 	}
-	foreign, _ := NewModule(New(config.Default()), "/admin/report")
+	foreign, _ := NewModule(New(), "/admin/report")
 	if err := admin.RegisterModule(foreign); !errors.Is(err, ErrForeignModule) {
 		t.Errorf("foreign child error = %v, want ErrForeignModule", err)
 	}
@@ -223,7 +221,7 @@ func TestModuleNestingRejectedPairs(t *testing.T) {
 // TestModuleConcurrentAccess mixes controller registration with lookups from
 // many goroutines; run with -race.
 func TestModuleConcurrentAccess(t *testing.T) {
-	app := New(config.Default())
+	app := New()
 	m, _ := NewModule(app, "/admin")
 	if err := app.RegisterModule(m); err != nil {
 		t.Fatalf("RegisterModule unexpected error: %v", err)

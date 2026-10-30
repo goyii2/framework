@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"strconv"
 	"strings"
 )
 
@@ -41,33 +40,4 @@ func formatAttrs(m map[string]any) string {
 		parts = append(parts, k+"="+formatValue(m[k]))
 	}
 	return strings.Join(parts, " ")
-}
-
-// configRows flattens the configuration summary into display rows, secrets
-// already masked by summarizeConfig.
-func configRows(c ConfigSummary) [][2]string {
-	rows := [][2]string{
-		{"app.name", c.App.Name},
-		{"app.env", c.App.Env},
-		{"app.language", c.App.Language},
-		{"app.debug", strconv.FormatBool(c.App.Debug)},
-		{"web.listen", c.Web.Listen},
-		{"db.driver", c.DB.Driver},
-		{"db.dsn", c.DB.DSN},
-		{"redis.addr", c.Redis.Addr},
-		{"redis.db", strconv.Itoa(c.Redis.DB)},
-		{"redis.password", c.Redis.Password},
-		{"cache.driver", c.Cache.Driver},
-		{"session.backend", c.Session.Backend},
-		{"queue.driver", c.Queue.Driver},
-		{"log.level", c.Log.Level},
-		{"log.targets", strings.Join(c.Log.Targets, ", ")},
-		{"mail.driver", c.Mail.Driver},
-		{"mail.from", c.Mail.From},
-		{"mail.smtp.host", c.Mail.SMTP.Host},
-		{"mail.smtp.port", strconv.Itoa(c.Mail.SMTP.Port)},
-		{"mail.smtp.username", c.Mail.SMTP.Username},
-		{"mail.smtp.password", c.Mail.SMTP.Password},
-	}
-	return rows
 }

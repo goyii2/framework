@@ -1,11 +1,8 @@
 package base
 
 import (
-	"fmt"
 	"log/slog"
-	"os"
 
-	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/log"
 )
 
@@ -22,55 +19,44 @@ type Log interface {
 	Error(msg string, args ...any)
 }
 
-// newDefaultLog builds the default logging component: the framework log
-// package driven by the log configuration section. When a configured target
-// cannot be built (unknown type, unwritable path), the failure is reported
-// on stderr and the component degrades to console-only logging so the
-// application still starts.
-func newDefaultLog(cfg config.Log) Log {
-	l, err := log.New(logConfigOf(cfg))
+// Log returns the logging component.
+func (a *Application) Log() Log { return a.log }
+
+// Logger returns the logging component under its full API (category
+// scoping, target management, profiling). It is the concrete default
+// implementation; a foreign component installed via SetLog is wrapped, with
+// delivery forwarded to it.
+func (a *Application) Logger() *log.Logger { return loggerOf(a.log) }
+
+// SetLog replaces the logging component (e.g. a test fake or the logger
+// built from the project's configuration); nil restores the console
+// fallback.
+func (a *Application) SetLog(l Log) {
+	if l == nil {
+		l = newDefaultLog()
+	}
+	a.log = l
+}
+
+// newDefaultLog builds the fallback logging component: console logging at
+// info level. The zero-value log.Config selects exactly that, so this
+// constructor cannot fail; a failure here is a framework bug and panics.
+func newDefaultLog() Log {
+	l, err := log.New(log.Config{})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "goyii: %v; falling back to console logging\n", err)
-		// The fallback names no targets, so it lands on the console default
-		// and cannot fail.
-		l, _ = log.New(log.Config{Level: cfg.Level})
+		panic("goyii: building the default log component: " + err.Error())
 	}
 	return l
 }
 
-// logConfigOf is the transitional struct-equivalence conversion from the
-// config package's log section to the log package's parameter bundle; it
-// goes away once the application stops carrying a config object.
-func logConfigOf(cfg config.Log) log.Config {
-	out := log.Config{
-		Level: cfg.Level,
-		Gorm: log.GormConfig{
-			Disable:         cfg.Gorm.Disable,
-			SlowThresholdMs: cfg.Gorm.SlowThresholdMs,
-		},
+// loggerOf resolves a log component to its rich concrete type. The framework
+// default (and anything installed as *log.Logger) is returned directly;
+// foreign implementations of the minimal Log contract are wrapped so callers
+// always receive the full API (categories, targets, profiling), with
+// delivery forwarded to the wrapped implementation.
+func loggerOf(l Log) *log.Logger {
+	if lv, ok := l.(*log.Logger); ok {
+		return lv
 	}
-	for _, t := range cfg.Targets {
-		out.Targets = append(out.Targets, log.TargetConfig{
-			Type:       t.Type,
-			MinLevel:   t.MinLevel,
-			Categories: t.Categories,
-			Except:     t.Except,
-			Path:       t.Path,
-			MaxSizeMB:  t.MaxSizeMB,
-			MaxFiles:   t.MaxFiles,
-		})
-	}
-	return out
-}
-
-// loggerOf resolves a log component holder to its rich concrete type. The
-// framework default (and anything installed as *log.Logger) is returned
-// directly; foreign implementations of the minimal Log contract are wrapped
-// so callers always receive the full API (categories, targets, profiling),
-// with delivery forwarded to the wrapped implementation.
-func loggerOf(c *component[Log]) *log.Logger {
-	if l, ok := c.get().(*log.Logger); ok {
-		return l
-	}
-	return log.Wrap(c.get())
+	return log.Wrap(l)
 }

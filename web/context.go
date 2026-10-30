@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/goyii2/framework/base"
+	"github.com/goyii2/framework/session"
 	"github.com/goyii2/framework/view"
 )
 
@@ -38,7 +39,7 @@ type Context struct {
 	// session is the request-scoped session the session middleware opened;
 	// user is the authentication state bound to it. Nil when the middleware
 	// did not run.
-	session *Session
+	session *session.Session
 	user    *User
 
 	// auth is the authorization backend (AccessChecker) the handler was
@@ -72,7 +73,7 @@ func (c *Context) CsrfToken() string { return c.csrf }
 // Session returns the request-scoped session; nil when the session
 // middleware is not in the chain. The HTTP entry point installs it by
 // default, so applications assembling a custom chain are the nil case.
-func (c *Context) Session() *Session { return c.session }
+func (c *Context) Session() *session.Session { return c.session }
 
 // User returns the request-scoped authentication state (the current
 // identity, Login/Logout); nil when the session middleware is not in the

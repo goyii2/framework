@@ -215,13 +215,6 @@ templ detailPage(e *Entry) {
 					</table>
 				}
 
-				<h2>Configuration</h2>
-				<table>
-					for _, row := range configRows(e.Config) {
-						<tr><td class="k">{ row[0] }</td><td><code>{ row[1] }</code></td></tr>
-					}
-				</table>
-
 				<h2>Mail ({ strconv.Itoa(len(e.Mail)) })</h2>
 				if len(e.Mail) == 0 {
 					<p class="meta">No messages recorded.</p>

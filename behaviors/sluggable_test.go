@@ -239,9 +239,6 @@ func (optionless) TableName() string { return "articles" }
 
 // exec runs a raw statement on the connection backing ctx.
 func exec(ctx context.Context, query string, args ...any) error {
-	conn, err := base.FromContext(ctx).DB()
-	if err != nil {
-		return err
-	}
+	conn := base.FromContext(ctx).DB()
 	return conn.Exec(query, args...).Error
 }

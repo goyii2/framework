@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/goyii2/framework/base"
-	"github.com/goyii2/framework/config"
+	"github.com/goyii2/framework/session"
 	"github.com/goyii2/framework/web"
 )
 
@@ -29,13 +29,14 @@ var (
 )
 
 // userApp assembles a login/logout application over the given session
-// configuration. The identity finder resolves from a mutable table so tests
-// can also simulate identities disappearing between requests.
-func userApp(t *testing.T, cfg config.Session) (*web.Handler, *map[string]web.Identity) {
+// manager. The identity finder resolves from a mutable table so tests can
+// also simulate identities disappearing between requests.
+func userApp(t *testing.T, m *session.Manager) (*web.Handler, *map[string]web.Identity) {
 	t.Helper()
 	users := map[string]web.Identity{alice.GetID(): alice, bob.GetID(): bob}
-	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}, Session: cfg})
-	h := web.NewHandler(app)
+	app := base.New()
+	app.SetSession(m)
+	h := web.NewHandler(app, web.WithoutCsrf())
 	h.SessionManager().IdentityFinder = func(id string) (web.Identity, bool) {
 		u, ok := users[id]
 		return u, ok
@@ -86,7 +87,7 @@ func whoami(t *testing.T, h http.Handler, cookies ...*http.Cookie) (string, bool
 }
 
 func TestUserStartsAsGuest(t *testing.T) {
-	h, _ := userApp(t, fileSessionConfig(t))
+	h, _ := userApp(t, fileSessionManager(t))
 
 	if name, guest := whoami(t, h); name != "" || !guest {
 		t.Fatalf("fresh request: name=%q guest=%v, want a guest", name, guest)
@@ -94,7 +95,7 @@ func TestUserStartsAsGuest(t *testing.T) {
 }
 
 func TestLoginBindsIdentityAcrossRequests(t *testing.T) {
-	h, _ := userApp(t, fileSessionConfig(t))
+	h, _ := userApp(t, fileSessionManager(t))
 
 	res := sessionReq(t, h, http.MethodPost, "/login")
 	if res.StatusCode != http.StatusOK {
@@ -119,14 +120,14 @@ func TestLoginBindsIdentityAcrossRequests(t *testing.T) {
 func TestLoginRegeneratesSessionID(t *testing.T) {
 	for _, backend := range []struct {
 		name string
-		cfg  func(t *testing.T) config.Session
+		mgr  func(t *testing.T) *session.Manager
 	}{
-		{"file", fileSessionConfig},
-		{"redis", redisSessionConfig},
+		{"file", fileSessionManager},
+		{"redis", redisSessionManager},
 	} {
 		t.Run(backend.name, func(t *testing.T) {
-			cfg := backend.cfg(t)
-			h, _ := userApp(t, cfg)
+			m := backend.mgr(t)
+			h, _ := userApp(t, m)
 
 			// Establish a pre-login session the attacker's id might be
 			// riding on, with data the legitimate user expects to keep.
@@ -151,10 +152,10 @@ func TestLoginRegeneratesSessionID(t *testing.T) {
 			if name, guest := whoami(t, h, ck2); name != "alice" || guest {
 				t.Fatalf("new id after login: name=%q guest=%v, want alice", name, guest)
 			}
-			if _, ok := loadSessionRecord(t, cfg, ck2.Value); !ok {
+			if _, ok := loadSessionRecord(t, m, ck2.Value); !ok {
 				t.Fatal("new session record missing from backend")
 			}
-			if _, ok := loadSessionRecord(t, cfg, ck.Value); ok {
+			if _, ok := loadSessionRecord(t, m, ck.Value); ok {
 				t.Fatal("old session record still alive in backend")
 			}
 			res = sessionReq(t, h, http.MethodGet, "/read", ck2)
@@ -172,8 +173,8 @@ func TestLoginRegeneratesSessionID(t *testing.T) {
 // TestLogoutInvalidatesSession: after logout the session record is gone, the
 // cookie is cleared and follow-up requests with the old id are guests.
 func TestLogoutInvalidatesSession(t *testing.T) {
-	cfg := fileSessionConfig(t)
-	h, _ := userApp(t, cfg)
+	m := fileSessionManager(t)
+	h, _ := userApp(t, m)
 
 	ck := sessionCookieOf(t, sessionReq(t, h, http.MethodPost, "/login"), "goyii-session")
 	if name, _ := whoami(t, h, ck); name != "alice" {
@@ -187,7 +188,7 @@ func TestLogoutInvalidatesSession(t *testing.T) {
 	if ck2 := sessionCookieOf(t, res, "goyii-session"); ck2 == nil || ck2.MaxAge >= 0 {
 		t.Fatalf("logout must clear the cookie, got %+v", ck2)
 	}
-	if _, ok := loadSessionRecord(t, cfg, ck.Value); ok {
+	if _, ok := loadSessionRecord(t, m, ck.Value); ok {
 		t.Fatal("session record still alive in backend after logout")
 	}
 	if name, guest := whoami(t, h, ck); name != "" || !guest {
@@ -199,8 +200,8 @@ func TestLogoutInvalidatesSession(t *testing.T) {
 // resolves (deleted account) degrades to a guest instead of failing the
 // request, and the stale key is dropped.
 func TestIdentityDisappearingBetweenRequests(t *testing.T) {
-	cfg := fileSessionConfig(t)
-	h, users := userApp(t, cfg)
+	m := fileSessionManager(t)
+	h, users := userApp(t, m)
 
 	ck := sessionCookieOf(t, sessionReq(t, h, http.MethodPost, "/login"), "goyii-session")
 	delete(*users, alice.GetID())
@@ -209,8 +210,8 @@ func TestIdentityDisappearingBetweenRequests(t *testing.T) {
 		t.Fatalf("unresolvable identity: name=%q guest=%v, want guest", name, guest)
 	}
 	// The stale key left the record, so the session is a plain empty one.
-	if _, ok := loadSessionRecord(t, cfg, ck.Value); ok {
-		record, _ := loadSessionRecord(t, cfg, ck.Value)
+	if _, ok := loadSessionRecord(t, m, ck.Value); ok {
+		record, _ := loadSessionRecord(t, m, ck.Value)
 		if _, has := record["__id"]; has {
 			t.Fatalf("stale identity key survived: %#v", record)
 		}
@@ -251,8 +252,8 @@ func TestIdentityFromContext(t *testing.T) {
 	// Through a request: a guest resolves nil, the session identity
 	// resolves by name, and an explicitly bound identity outranks the
 	// session one.
-	cfg := fileSessionConfig(t)
-	h, _ := userApp(t, cfg)
+	m := fileSessionManager(t)
+	h, _ := userApp(t, m)
 	h.Get("/resolve", func(c *web.Context) error {
 		name := ""
 		if id := web.IdentityFromContext(c.Context()); id != nil {

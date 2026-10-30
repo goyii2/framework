@@ -1,3 +1,21 @@
+// Package config loads a project's own configuration values. It owns no
+// configuration fields: LoadAs[T] fills whatever struct the project defines —
+// identity and server values, the component packages' parameter bundles,
+// fully custom sections — from the same three machines every project gets:
+//
+//  1. the active environment is selected by the GOYII_ENV environment
+//     variable, defaulting to "dev" (see Env);
+//  2. <dir>/app.yaml loads first and <dir>/web-<env>.yaml overlays it
+//     (fields absent from the overlay keep their base values);
+//  3. environment variables override leaf fields: a field's path, upper-cased
+//     and joined with underscores, addresses it (DB.DSN -> DB_DSN,
+//     App.Debug -> APP_DEBUG, Cache.Redis.Addr -> CACHE_REDIS_ADDR,
+//     Email.APIKey -> EMAIL_APIKEY).
+//
+// The loader fills no defaults — zero values stay zero and every component
+// package defaults inside its own constructor. A project that prefers a
+// different loader (viper, koanf, plain flags) skips this package entirely;
+// no framework code depends on it.
 package config
 
 import (
@@ -14,65 +32,56 @@ import (
 	"github.com/goccy/go-yaml"
 )
 
-// EnvVarName is the environment variable selecting the active environment
-// when Load is called without an explicit one.
+// EnvVarName is the environment variable selecting the active environment.
 const EnvVarName = "GOYII_ENV"
 
-// Load loads configuration for the environment named by the GOYII_ENV
-// environment variable (default "dev") from the given directory.
-func Load(dir string) (Config, error) {
-	return LoadEnv(dir, CurrentEnv())
-}
-
-// CurrentEnv returns the active environment name: GOYII_ENV when set to a
-// non-empty value, otherwise "dev".
-func CurrentEnv() string {
+// Env returns the active environment name: GOYII_ENV when set to a non-empty
+// value, otherwise "dev".
+func Env() string {
 	if env := os.Getenv(EnvVarName); env != "" {
 		return env
 	}
 	return "dev"
 }
 
-// LoadEnv loads dir/app.yaml, overlays dir/web-<env>.yaml when present
-// (fields absent from the overlay keep their base values), then applies
-// environment variable overrides and fills defaults. At least one of the two
-// files must exist; the resolved environment name is recorded in Config.Env.
-func LoadEnv(dir, env string) (Config, error) {
-	var cfg Config
+// LoadAs loads the configuration of type T from dir: app.yaml first, then the
+// web-<env>.yaml overlay for the active environment (Env), then environment
+// variable overrides. At least one of the two files must exist. T must be a
+// struct; every other shape is rejected. No defaults are filled — components
+// default in their own constructors, so a project's zero values reach them
+// unchanged.
+func LoadAs[T any](dir string) (T, error) {
+	var cfg T
+	v := reflect.ValueOf(&cfg).Elem()
+	if v.Kind() != reflect.Struct {
+		return cfg, fmt.Errorf("config: LoadAs requires a struct type, got %s", v.Kind())
+	}
 	found := false
-	for _, name := range []string{"app.yaml", "web-" + env + ".yaml"} {
+	for _, name := range []string{"app.yaml", "web-" + Env() + ".yaml"} {
 		data, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
 				continue
 			}
-			return Config{}, fmt.Errorf("config: read %s: %w", name, err)
+			return cfg, fmt.Errorf("config: read %s: %w", name, err)
 		}
 		if err := yaml.Unmarshal(data, &cfg); err != nil {
-			return Config{}, fmt.Errorf("config: parse %s: %w", name, err)
+			return cfg, fmt.Errorf("config: parse %s: %w", name, err)
 		}
 		found = true
 	}
 	if !found {
-		return Config{}, fmt.Errorf("config: no configuration files found in %s (expected app.yaml and/or web-%s.yaml)", dir, env)
+		return cfg, fmt.Errorf("config: no configuration files found in %s (expected app.yaml and/or web-%s.yaml)", dir, Env())
 	}
-
-	if err := applyEnvOverrides(&cfg); err != nil {
-		return Config{}, err
+	if err := walkOverrides(v, nil); err != nil {
+		return cfg, err
 	}
-	// The environment name comes from the selector (GOYII_ENV / argument),
-	// never from a config value.
-	cfg.Env = env
-	return WithDefaults(cfg), nil
+	return cfg, nil
 }
 
-// applyEnvOverrides walks every exported leaf field of cfg and, when its
+// walkOverrides visits every exported leaf field of v and, when its
 // environment variable is set (path upper-cased, joined by '_'), parses the
 // value into the field. An empty environment value counts as not set.
-func applyEnvOverrides(cfg *Config) error {
-	return walkOverrides(reflect.ValueOf(cfg).Elem(), nil)
-}
-
 func walkOverrides(v reflect.Value, path []string) error {
 	t := v.Type()
 	for i := 0; i < t.NumField(); i++ {

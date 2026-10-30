@@ -3,102 +3,101 @@ package base
 import (
 	"context"
 	"sync/atomic"
-	"time"
 
 	"github.com/redis/go-redis/v9"
 
 	"github.com/goyii2/framework/cache"
-	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/db"
 	"github.com/goyii2/framework/i18n"
-	"github.com/goyii2/framework/log"
 	"github.com/goyii2/framework/mail"
 	"github.com/goyii2/framework/mutex"
 	"github.com/goyii2/framework/queue"
+	"github.com/goyii2/framework/session"
 )
 
 // Application is the process-level component container. Components are
-// strong-typed fields behind accessors: each is lazily initialized on first
-// access (concurrency-safe) and replaceable via its Set method for tests or
-// alternative implementations. Request-scoped code receives the application
-// through the context (WithContext / FromContext); code without a request
-// context uses the package-level Default instance.
+// strong-typed fields behind zero-error accessors: the constructor installs
+// fallback defaults for every component that has one, the application entry
+// replaces them (Set methods) with the components it built from its own
+// configuration, and db / redis have no fallback — accessing them without
+// wiring one is a programmer error and panics with a message saying so.
+// Request-scoped code receives the application through the context
+// (WithContext / FromContext); code without a request context uses the
+// package-level Default instance.
 type Application struct {
-	cfg       config.Config
-	log       *component[Log]
-	db        *db.Component
-	redisComp *component[redis.UniversalClient]
-	cacheComp *component[cache.Cache]
-	mutexComp *component[mutex.Mutex]
-	i18nComp  *component[*i18n.MessageSource]
-	mailComp  *component[mail.Mailer]
-	queueComp *component[*queue.Queue]
-	events    eventRegistry
-	modules   moduleRegistry
+	name  string
+	env   string
+	debug bool
 
+	log     Log
+	db      *db.Conn
+	redis   redis.UniversalClient
+	cache   cache.Cache
+	mutex   mutex.Mutex
+	mail    mail.Mailer
+	queue   *queue.Queue
+	session *session.Manager
+	i18n    *i18n.MessageSource
+
+	events      eventRegistry
+	modules     moduleRegistry
 	controllers controllerRegistry
 }
 
-// New assembles an Application from cfg, filling zero values with framework
-// defaults. Component construction is deferred to first access. Unless the
-// log configuration disables it, the database connection is opened with the
-// GORM query logging adapter routing queries, slow queries and errors into
-// the log component (category "db").
-func New(cfg config.Config) *Application {
-	cfg = config.WithDefaults(cfg)
-	logComp := newComponent(func() Log { return newDefaultLog(cfg.Log) })
+// Option configures an Application at construction. Options carry the
+// application's identity only; components are installed with the Set methods
+// after their construction succeeded in the application entry.
+type Option func(*Application)
 
-	var dbOpts []db.Option
-	if !cfg.Log.Gorm.Disable {
-		slow := time.Duration(cfg.Log.Gorm.SlowThresholdMs) * time.Millisecond
-		dbOpts = append(dbOpts, db.WithGormLogger(db.NewGormLogger(func() *log.Logger {
-			return loggerOf(logComp)
-		}, slow)))
+// WithApp sets the application's identity: its name, the environment it runs
+// in (typically config.Env()) and the debug flag steering the error pages and
+// the debug panel. Empty values keep the defaults ("myapp", "dev").
+func WithApp(name, env string, debug bool) Option {
+	return func(a *Application) {
+		if name != "" {
+			a.name = name
+		}
+		if env != "" {
+			a.env = env
+		}
+		a.debug = debug
 	}
-	redisComp := newComponent(func() redis.UniversalClient { return newDefaultRedis(cfg.Redis) })
-	a := &Application{
-		cfg:       cfg,
-		log:       logComp,
-		db:        db.NewComponent(db.Config{Driver: cfg.DB.Driver, DSN: cfg.DB.DSN}, dbOpts...),
-		redisComp: redisComp,
-		cacheComp: newComponent(func() cache.Cache { return newDefaultCache(cfg.Cache, redisComp) }),
-		mutexComp: newComponent(func() mutex.Mutex { return newDefaultMutex(cfg.Mutex, redisComp) }),
-		i18nComp:  newComponent(func() *i18n.MessageSource { return newDefaultI18n(cfg) }),
-		mailComp:  newComponent(func() mail.Mailer { return newDefaultMail(cfg, logComp) }),
+}
+
+// New assembles an Application. Everything except the database and redis
+// connections gets a working fallback default (console logging, memory cache,
+// process mutex, log mailer, file sessions, sync queue, empty message
+// source); the application entry replaces what its configuration says to
+// replace. The database and redis connections are never built here — opening
+// them can fail, so construction belongs to the caller (see ConnectDB and the
+// Set methods).
+func New(opts ...Option) *Application {
+	a := &Application{name: "myapp", env: "dev"}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(a)
+		}
 	}
-	// The queue factory closes over the application itself, to route the
-	// queue's lifecycle events into this application's registry; it only
-	// runs on first Queue() access, after a is fully assembled.
-	a.queueComp = newComponent(func() *queue.Queue {
-		return newDefaultQueue(cfg.Queue, a.db, a.redisComp, a)
-	})
+	a.log = newDefaultLog()
+	a.cache = newDefaultCache()
+	a.mutex = newDefaultMutex()
+	a.mail = newDefaultMail(a)
+	a.session = newDefaultSession()
+	a.i18n = newDefaultI18n()
+	a.queue = a.newDefaultQueue()
 	return a
 }
 
-// Config returns the application configuration.
-func (a *Application) Config() config.Config { return a.cfg }
+// Name returns the application's name (debug pages and log context).
+func (a *Application) Name() string { return a.name }
 
-// Log returns the logging component, initializing it on first access.
-func (a *Application) Log() Log { return a.log.get() }
+// Env returns the environment the application runs in (typically selected by
+// the project's configuration loading; "dev" when nothing set one).
+func (a *Application) Env() string { return a.env }
 
-// Logger returns the logging component under its full API (category
-// scoping, target management, profiling). It is the concrete default
-// implementation; a foreign component installed via SetLog is wrapped, with
-// delivery forwarded to it.
-func (a *Application) Logger() *log.Logger { return loggerOf(a.log) }
-
-// SetLog replaces the logging component (e.g. a test fake or a richer
-// implementation); nil restores lazy initialization of the default.
-func (a *Application) SetLog(l Log) { a.log.set(l) }
-
-// DB returns the database connection component, opening it on first access.
-// The connection comes from the configuration's db section; a failed open
-// returns the error and is retried on the next call.
-func (a *Application) DB() (*db.Conn, error) { return a.db.Get() }
-
-// SetDB replaces the database connection (e.g. a test fake or a pre-opened
-// connection); nil restores lazy initialization from the configuration.
-func (a *Application) SetDB(c *db.Conn) { a.db.Set(c) }
+// Debug reports whether the application runs in debug mode: error responses
+// reveal their real error text and the debug panel mounts.
+func (a *Application) Debug() bool { return a.debug }
 
 // On subscribes h to the event name and returns a function that
 // unsubscribes it again (idempotent). Handlers run in registration order
@@ -149,7 +148,7 @@ type appKey struct{}
 // (i18n.T, i18n.F) resolve it without depending on this package.
 func (a *Application) WithContext(ctx context.Context) context.Context {
 	ctx = context.WithValue(ctx, appKey{}, a)
-	return i18n.WithSource(ctx, a.i18nComp.get())
+	return i18n.WithSource(ctx, a.i18n)
 }
 
 // FromContext returns the application carried by ctx; when ctx carries none
@@ -167,13 +166,13 @@ var defaultApp atomic.Pointer[Application]
 
 // Default returns the package-level default application used wherever no
 // request-scoped application is available (CLI, background jobs). It is
-// created lazily from framework defaults on first use; SetDefault installs an
-// explicitly assembled application instead.
+// created lazily with the fallback components only on first use; SetDefault
+// installs an explicitly assembled application instead.
 func Default() *Application {
 	if app := defaultApp.Load(); app != nil {
 		return app
 	}
-	app := New(config.Default())
+	app := New()
 	if defaultApp.CompareAndSwap(nil, app) {
 		return app
 	}
@@ -181,7 +180,7 @@ func Default() *Application {
 }
 
 // SetDefault installs app as the package-level default; nil clears it so the
-// next Default call rebuilds from framework defaults.
+// next Default call rebuilds with the fallback components.
 func SetDefault(app *Application) {
 	defaultApp.Store(app)
 }

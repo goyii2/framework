@@ -40,8 +40,8 @@ func (site *SiteController) Middleware() []web.Middleware {
 // bound for /site/index, the controller registry resolves it instead.
 func (site *SiteController) ActionIndex(c *web.Context) error {
 	return c.JSON(map[string]any{
-		"app": c.App().Config().App.Name,
-		"env": c.App().Config().Env,
+		"app": c.App().Name(),
+		"env": c.App().Env(),
 		"endpoints": []string{
 			"/site/csrf", "/login", "/logout", "/me",
 			"/post", "/post/{id}",
@@ -202,7 +202,7 @@ func (site *SiteController) ActionNotify(c *web.Context) error {
 		recipient = identity.GetName() + "@example.com"
 	}
 	subject := i18n.T(c.Context(), "app", "A test email from {app}",
-		map[string]any{"app": c.App().Config().App.Name})
+		map[string]any{"app": c.App().Name()})
 	body := i18n.T(c.Context(), "app", "This message was composed by the mail example of the basic application.", nil)
 	msg := mail.NewMessage().
 		SetFrom("goyii basic <no-reply@goyii.example>").

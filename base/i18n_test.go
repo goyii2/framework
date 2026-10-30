@@ -5,19 +5,18 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/i18n"
 )
 
 func TestApplicationI18nComponent(t *testing.T) {
-	app := New(config.Config{})
+	app := New()
 	if src := app.I18n(); src == nil {
-		t.Fatal("I18n() = nil, want the lazily built default source")
+		t.Fatal("I18n() = nil, want the empty default source")
 	}
-	// The default source loads from the configured directory; absent from
-	// the test working directory, it carries no translations.
+	// The default source carries no translations: every message renders as
+	// its id.
 	if langs := app.I18n().Languages(); len(langs) != 0 {
-		t.Errorf("default source languages = %v, want none without a messages directory", langs)
+		t.Errorf("default source languages = %v, want none", langs)
 	}
 
 	custom := i18n.NewMessageSource(fstest.MapFS{
@@ -30,14 +29,14 @@ func TestApplicationI18nComponent(t *testing.T) {
 
 	app.SetI18n(nil)
 	if app.I18n() == custom {
-		t.Error("SetI18n(nil) did not restore lazy initialization")
+		t.Error("SetI18n(nil) did not restore the empty default")
 	}
 }
 
 // TestWithContextCarriesI18nSource proves the request context hands the i18n
 // helpers their source: WithContext stashes it under i18n's own key.
 func TestWithContextCarriesI18nSource(t *testing.T) {
-	app := New(config.Config{})
+	app := New()
 	ctx := app.WithContext(context.Background())
 
 	src, ok := i18n.SourceFromContext(ctx)

@@ -9,13 +9,12 @@ import (
 	"time"
 
 	"github.com/goyii2/framework/base"
-	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/web"
 )
 
 func TestRateLimiterAdmitsUpToLimitThenRejects429(t *testing.T) {
-	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}})
-	h := web.NewHandler(app)
+	app := base.New()
+	h := web.NewHandler(app, web.WithoutCsrf())
 	h.Use(web.RateLimiter{Limit: 2, Window: time.Minute}.Middleware())
 	h.Get("/hit", func(c *web.Context) error { return c.JSON(map[string]string{"ok": "yes"}) })
 
@@ -35,8 +34,8 @@ func TestRateLimiterAdmitsUpToLimitThenRejects429(t *testing.T) {
 }
 
 func TestRateLimiterKeysSeparateCallers(t *testing.T) {
-	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}})
-	h := web.NewHandler(app)
+	app := base.New()
+	h := web.NewHandler(app, web.WithoutCsrf())
 	h.Use(web.RateLimiter{
 		Limit:  1,
 		Window: time.Minute,

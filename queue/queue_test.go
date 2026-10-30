@@ -2,7 +2,6 @@ package queue
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -732,26 +731,6 @@ func TestRetryFailedDelegates(t *testing.T) {
 	}
 	if n != 1 {
 		t.Errorf("RetryFailed = %d, want 1", n)
-	}
-}
-
-// TestFailingDriverSurfacesErrors verifies the failing driver reports its
-// error from every operation, the shape used for misconfiguration.
-func TestFailingDriverSurfacesErrors(t *testing.T) {
-	boom := errors.New("boom")
-	q := NewWithDriver(Failing(boom), new(Registry))
-
-	if _, err := q.Push(context.Background(), &countedJob{}); err == nil || !errors.Is(err, boom) {
-		t.Errorf("Push through failing driver: err=%v, want boom", err)
-	}
-	if _, err := q.Run(context.Background()); err == nil || !errors.Is(err, boom) {
-		t.Errorf("Run through failing driver: err=%v, want boom", err)
-	}
-	if _, err := q.RetryFailed(context.Background()); err == nil || !errors.Is(err, boom) {
-		t.Errorf("RetryFailed through failing driver: err=%v, want boom", err)
-	}
-	if err := q.Listen(context.Background()); err == nil || !errors.Is(err, boom) {
-		t.Errorf("Listen through failing driver: err=%v, want boom", err)
 	}
 }
 

@@ -14,25 +14,23 @@ import (
 	"time"
 
 	"github.com/goyii2/framework/base"
-	"github.com/goyii2/framework/config"
+	"github.com/goyii2/framework/session"
 	"github.com/goyii2/framework/web"
 )
 
 const toolbarMark = `id="goyii-debug-toolbar"`
 
 // newPanelServer assembles a debug application: handler, mounted panel
-// storing into a temp directory, isolated session/cache paths.
-func newPanelServer(t *testing.T, mutate func(*config.Config)) (*web.Handler, *Panel, *base.Application) {
+// storing into a temp directory, isolated session path.
+func newPanelServer(t *testing.T, hopts ...web.HandlerOption) (*web.Handler, *Panel, *base.Application) {
 	t.Helper()
-	cfg := config.Default()
-	cfg.App.Debug = true
-	if mutate != nil {
-		mutate(&cfg)
+	app := base.New(base.WithApp("panel-test", "dev", true))
+	sess, err := session.New(session.Config{Path: t.TempDir()})
+	if err != nil {
+		t.Fatalf("session.New: %v", err)
 	}
-	cfg.Session.Path = t.TempDir()
-	cfg.Cache.Path = t.TempDir()
-	app := base.New(cfg)
-	h := web.NewHandler(app)
+	app.SetSession(sess)
+	h := web.NewHandler(app, hopts...)
 	p := New(app)
 	p.Dir = t.TempDir()
 	p.Mount(h)
@@ -188,10 +186,7 @@ func TestStreamingResponsePassesThroughWithoutToolbar(t *testing.T) {
 }
 
 func TestEntryCapturesRequestAndAllPanels(t *testing.T) {
-	h, p, _ := newPanelServer(t, func(cfg *config.Config) {
-		cfg.DB.Driver = "mysql"
-		cfg.DB.DSN = "root:seekrit@tcp(localhost:3306)/app"
-	})
+	h, p, _ := newPanelServer(t)
 	h.Get("/post/{id:[0-9]+}", func(c *web.Context) error {
 		c.Session().Set("cart", "books")
 		c.App().Log().Info("handling it", "step", 2)
@@ -253,13 +248,6 @@ func TestEntryCapturesRequestAndAllPanels(t *testing.T) {
 	// Mail panel.
 	if len(e.Mail) != 1 || !strings.Contains(e.Mail[0].Message, "Subject: hi") {
 		t.Errorf("mail panel = %+v", e.Mail)
-	}
-	// Configuration panel, secrets masked.
-	if e.Config.DB.DSN != "root:***@tcp(localhost:3306)/app" {
-		t.Errorf("config dsn = %q", e.Config.DB.DSN)
-	}
-	if e.Config.DB.Driver != "mysql" {
-		t.Errorf("config driver = %q", e.Config.DB.Driver)
 	}
 }
 
@@ -330,7 +318,7 @@ func TestPanelPagesServeWithoutCapture(t *testing.T) {
 		t.Fatalf("detail status = %d", rec.Code)
 	}
 	detail := rec.Body.String()
-	if !strings.Contains(detail, "Configuration") || !strings.Contains(detail, "Session / User") {
+	if !strings.Contains(detail, "Session / User") || !strings.Contains(detail, "Mail") {
 		t.Errorf("detail page missing panels:\n%s", detail)
 	}
 	if strings.Contains(detail, toolbarMark) {
@@ -348,7 +336,7 @@ func TestPanelPagesServeWithoutCapture(t *testing.T) {
 }
 
 func TestPanelAccessControl(t *testing.T) {
-	h, p, _ := newPanelServer(t, func(cfg *config.Config) {})
+	h, p, _ := newPanelServer(t)
 	h.Get("/page", func(c *web.Context) error {
 		return writeHTML(c, "<html><body>x</body></html>")
 	})
@@ -386,9 +374,7 @@ func TestPanelAccessControlLoopbackByDefault(t *testing.T) {
 }
 
 func TestMountWithoutDebugDoesNothing(t *testing.T) {
-	cfg := config.Default()
-	cfg.App.Debug = false
-	app := base.New(cfg)
+	app := base.New()
 	h := web.NewHandler(app)
 	p := New(app)
 	p.Dir = t.TempDir()
@@ -632,7 +618,7 @@ func TestPanickingActionGetsErrorPageAndRecord(t *testing.T) {
 func TestPanelPagesGetOnly(t *testing.T) {
 	// CSRF sits outside the capture and answers tokenless POSTs first, so
 	// the method guard is exercised with it disabled.
-	h, _, _ := newPanelServer(t, func(cfg *config.Config) { cfg.Web.DisableCsrf = true })
+	h, _, _ := newPanelServer(t, web.WithoutCsrf())
 	rec := serve(h, http.MethodPost, "/debug", "127.0.0.1:1")
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("POST /debug status = %d, want 405", rec.Code)

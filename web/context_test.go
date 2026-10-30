@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/goyii2/framework/config"
+	"github.com/goyii2/framework/session"
 )
 
 func TestContextErrRecordsAndReadsError(t *testing.T) {
@@ -59,8 +59,11 @@ func TestSwapWriterRedirectsActionWritesAndRestores(t *testing.T) {
 }
 
 func TestSessionAllReturnsIndependentCopy(t *testing.T) {
-	m := NewSessionManager(config.Session{Name: "s", Backend: "file", Path: t.TempDir()})
-	s := newSession(m, httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+	m, err := session.New(session.Config{Name: "s", Backend: "file", Path: t.TempDir()})
+	if err != nil {
+		t.Fatalf("session.New: %v", err)
+	}
+	s := m.Begin(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
 	s.Set("cart", "books")
 
 	all := s.All()

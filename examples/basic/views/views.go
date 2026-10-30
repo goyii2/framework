@@ -173,7 +173,7 @@ func buildNav(c *web.Context) navData {
 	ctx := c.Context()
 	lang, _ := i18n.LanguageFromContext(ctx)
 	nav := navData{
-		AppName:   c.App().Config().App.Name,
+		AppName:   c.App().Name(),
 		Lang:      lang,
 		Head:      HeadAssets,
 		LoginURL:  url.To("site/login", nil),

@@ -9,8 +9,9 @@ import (
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
 
-	"github.com/goyii2/framework/config"
+	"github.com/goyii2/framework/db"
 	"github.com/goyii2/framework/migrate"
 	"github.com/goyii2/framework/queue"
 )
@@ -31,22 +32,24 @@ func (*appJob) Execute(context.Context) error {
 	return nil
 }
 
-// TestApplicationQueueComponent verifies the component semantics: built
-// lazily on first access, handed out unchanged afterwards, replaceable, and
-// reset by a nil replacement.
-func TestApplicationQueueComponent(t *testing.T) {
-	app := New(config.Config{})
+// TestApplicationQueueDefaultIsSync verifies the default queue is the sync
+// driver: replaceable, reset by a nil replacement, and executing inline.
+func TestApplicationQueueDefaultIsSync(t *testing.T) {
+	app := New()
 
-	if app.queueComp.val.Load() != nil {
-		t.Fatal("the queue component must not initialize before first use")
+	if _, ok := app.Queue().Driver().(*queue.Sync); !ok {
+		t.Fatalf("default queue driver is %T, want *queue.Sync", app.Queue().Driver())
 	}
 
-	q := app.Queue()
-	if q == nil {
-		t.Fatal("Queue() returned nil")
+	appRuns.Store(0)
+	if err := app.Queue().Jobs().Register(&appJob{}); err != nil {
+		t.Fatalf("register: %v", err)
 	}
-	if app.Queue() != q {
-		t.Error("repeated Queue() returned a different instance")
+	if _, err := app.Queue().Push(context.Background(), &appJob{Value: "x"}); err != nil {
+		t.Fatalf("Push through the sync default: %v", err)
+	}
+	if appRuns.Load() != 1 {
+		t.Fatalf("sync push executed %d times, want 1", appRuns.Load())
 	}
 
 	fake := queue.NewWithDriver(queue.NewSync(), nil)
@@ -57,50 +60,27 @@ func TestApplicationQueueComponent(t *testing.T) {
 
 	app.SetQueue(nil)
 	if app.Queue() == fake {
-		t.Error("SetQueue(nil) must restore lazy initialization from the configuration")
-	}
-}
-
-// TestApplicationQueueDefaultSyncZeroOverhead verifies the default driver is
-// sync and touches neither the database nor redis: an application that never
-// configures queue keeps its zero external dependencies.
-func TestApplicationQueueDefaultSyncZeroOverhead(t *testing.T) {
-	app := New(config.Config{})
-	appRuns.Store(0)
-	if err := app.Queue().Jobs().Register(&appJob{}); err != nil {
-		t.Fatalf("register: %v", err)
-	}
-
-	if _, err := app.Queue().Push(context.Background(), &appJob{Value: "x"}); err != nil {
-		t.Fatalf("Push through the sync default: %v", err)
-	}
-	if appRuns.Load() != 1 {
-		t.Fatalf("sync push executed %d times, want 1", appRuns.Load())
+		t.Error("SetQueue(nil) must restore the sync fallback")
 	}
 	if _, ok := app.Queue().Driver().(*queue.Sync); !ok {
-		t.Fatalf("default queue driver is %T, want *queue.Sync", app.Queue().Driver())
-	}
-	if app.redisComp.val.Load() != nil {
-		t.Error("the sync queue must not initialize the redis component")
+		t.Errorf("restored queue driver is %T, want *queue.Sync", app.Queue().Driver())
 	}
 }
 
-// TestApplicationQueueDbDriver verifies the db driver draws the application's
-// database connection and works end to end: push, worker drain, registry
-// rebuild from the application's registration.
+// TestApplicationQueueDbDriver verifies a db-driven queue assembled the way
+// an application entry does — queue.New over the installed db connection,
+// with the dispatcher routing events into the application's registry — works
+// end to end.
 func TestApplicationQueueDbDriver(t *testing.T) {
 	dsn := filepath.Join(t.TempDir(), "queue.db")
-	app := New(config.Config{
-		DB:    config.DB{Driver: "sqlite", DSN: dsn},
-		Queue: config.Queue{Driver: "db", TableName: "jobs", PollIntervalMs: 5},
-	})
+	app := New()
+	if err := app.ConnectDB(db.Config{Driver: "sqlite", DSN: dsn}, dbGormOff()); err != nil {
+		t.Fatalf("ConnectDB: %v", err)
+	}
+	conn := app.DB()
+	t.Cleanup(func() { _ = conn.Close() })
 
 	// Create the table the way applications do: the shipped migration.
-	conn, err := app.DB()
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = conn.Close() }) // release the file before TempDir cleanup
 	sqlDB, err := conn.DB.DB()
 	if err != nil {
 		t.Fatalf("raw handle: %v", err)
@@ -113,6 +93,13 @@ func TestApplicationQueueDbDriver(t *testing.T) {
 		t.Fatalf("apply queue migration: %v", err)
 	}
 
+	q, err := queue.New(queue.Config{Driver: "db", TableName: "jobs", PollIntervalMs: 5},
+		queue.WithDB(conn), app.QueueDispatcher())
+	if err != nil {
+		t.Fatalf("queue.New(db): %v", err)
+	}
+	app.SetQueue(q)
+
 	appRuns.Store(0)
 	if err := app.Queue().Jobs().Register(&appJob{}); err != nil {
 		t.Fatalf("register: %v", err)
@@ -122,22 +109,27 @@ func TestApplicationQueueDbDriver(t *testing.T) {
 	}
 	n, err := app.Queue().Run(context.Background())
 	if err != nil || n != 1 {
-		t.Fatalf("Run = %d, %v; want 1", n, err)
+		t.Fatalf("Run = %d, %v; want 1, nil", n, err)
 	}
 	if appRuns.Load() != 1 {
 		t.Errorf("job executed %d times, want 1", appRuns.Load())
 	}
 }
 
-// TestApplicationQueueRedisUsesSharedConnection verifies the redis driver
-// draws the application's shared redis connection and its messages land
-// under the queue prefix on that server.
+// TestApplicationQueueRedisUsesSharedConnection verifies a redis-driven queue
+// over the installed shared client lands its messages on that server.
 func TestApplicationQueueRedisUsesSharedConnection(t *testing.T) {
 	mr := miniredis.RunT(t)
-	app := New(config.Config{
-		Redis: config.Redis{Addr: mr.Addr()},
-		Queue: config.Queue{Driver: "redis"},
-	})
+	app := New()
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	app.SetRedis(client)
+
+	q, err := queue.New(queue.Config{Driver: "redis"}, queue.WithRedis(app.Redis()), app.QueueDispatcher())
+	if err != nil {
+		t.Fatalf("queue.New(redis): %v", err)
+	}
+	app.SetQueue(q)
 	if err := app.Queue().Jobs().Register(&appJob{}); err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -155,36 +147,14 @@ func TestApplicationQueueRedisUsesSharedConnection(t *testing.T) {
 	if !found {
 		t.Fatalf("no message landed under the goyii:queue: prefix (keys: %v)", mr.Keys())
 	}
-	if app.redisComp.val.Load() == nil {
-		t.Error("the redis queue must draw the shared redis connection")
-	}
-}
-
-// TestApplicationQueueUnknownDriverFailsOnUse verifies a misspelled driver
-// surfaces at first use instead of breaking application assembly.
-func TestApplicationQueueUnknownDriverFailsOnUse(t *testing.T) {
-	app := New(config.Config{Queue: config.Queue{Driver: "bogus"}})
-
-	if _, err := app.Queue().Push(context.Background(), &appJob{}); err == nil || !strings.Contains(err.Error(), "unknown driver") {
-		t.Fatalf("Push through a bad driver: err=%v, want unknown-driver error", err)
-	}
-}
-
-// TestApplicationQueueDbWithoutConnectionFailsOnUse verifies the db driver
-// with an unopenable database reports the underlying error at first use.
-func TestApplicationQueueDbWithoutConnectionFailsOnUse(t *testing.T) {
-	app := New(config.Config{Queue: config.Queue{Driver: "db"}}) // no DSN
-
-	if _, err := app.Queue().Push(context.Background(), &appJob{}); err == nil {
-		t.Fatal("Push through the db driver without a database must fail")
-	}
 }
 
 // TestApplicationQueueEventsFlowThroughBase verifies the five queue events
 // dispatch through the application's own On/Trigger registry, with the queue
-// package's event-name constants converting to base.EventName.
+// package's event-name constants converting to base.EventName — both for the
+// fallback and an installed queue carrying QueueDispatcher.
 func TestApplicationQueueEventsFlowThroughBase(t *testing.T) {
-	app := New(config.Config{})
+	app := New()
 	if err := app.Queue().Jobs().Register(&appJob{}); err != nil {
 		t.Fatalf("register: %v", err)
 	}

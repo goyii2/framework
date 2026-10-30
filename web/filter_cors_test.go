@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/goyii2/framework/base"
-	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/web"
 )
 
@@ -14,8 +13,8 @@ import (
 // ran; CSRF is off because CORS-focused tests do not carry form tokens.
 func corsApp(t *testing.T, cors web.Cors, actionRan *bool) *web.Handler {
 	t.Helper()
-	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}})
-	h := web.NewHandler(app)
+	app := base.New()
+	h := web.NewHandler(app, web.WithoutCsrf())
 	h.Use(cors.Middleware())
 	h.Get("/data", func(c *web.Context) error {
 		*actionRan = true

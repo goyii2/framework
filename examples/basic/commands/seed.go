@@ -122,11 +122,7 @@ func NewSeedCommand() *cobra.Command {
 // ask for these items by name. Re-running against an already-seeded database
 // changes nothing.
 func seedRbac(ctx context.Context) error {
-	app := base.FromContext(ctx)
-	conn, err := app.DB()
-	if err != nil {
-		return err
-	}
+	conn := base.FromContext(ctx).DB()
 	auth, err := rbac.NewDbManager(conn.DB)
 	if err != nil {
 		return err
@@ -208,10 +204,7 @@ func seedRbac(ctx context.Context) error {
 // or `goyii queue listen` (resident). Re-running the seed against a drained
 // queue plants them again only when the table is empty.
 func seedQueue(ctx context.Context) error {
-	conn, err := base.FromContext(ctx).DB()
-	if err != nil {
-		return err
-	}
+	conn := base.FromContext(ctx).DB()
 	var n int64
 	if err := conn.Table(jobs.Table).Count(&n).Error; err != nil {
 		return err

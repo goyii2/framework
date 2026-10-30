@@ -21,9 +21,9 @@ import (
 )
 
 // Panel is the development-time request introspection tool. Mounted on the
-// HTTP handler (Mount), it captures every request into a record — the seven
-// panels: request/routing, logs, SQL, timeline, session/user, configuration
-// summary, mail — writes each as one JSON file under Dir (keeping the most
+// HTTP handler (Mount), it captures every request into a record — the six
+// panels: request/routing, logs, SQL, timeline, session/user, mail —
+// writes each as one JSON file under Dir (keeping the most
 // recent KeepFiles), serves the browsing pages under /debug, and injects a
 // toolbar at the bottom of successful HTML responses linking the page to its
 // own record. Access to the pages is restricted to AllowCIDRs (loopback by
@@ -74,7 +74,7 @@ func New(app *base.Application) *Panel {
 // keep their own configured filters; a foreign log component installed via
 // SetLog cannot be extended this way and yields empty log panels.
 func (p *Panel) Mount(h *web.Handler) {
-	if !p.app.Config().App.Debug {
+	if !p.app.Debug() {
 		return
 	}
 	p.app.SetLog(p.app.Logger().
@@ -130,7 +130,7 @@ func (p *Panel) capture(w http.ResponseWriter, r *http.Request, next http.Handle
 
 	// The id is minted up front so the toolbar (rendered before the record
 	// is stored) can already link to this entry's detail page.
-	e := &Entry{ID: p.nextID(start), Time: start, Config: summarizeConfig(p.app.Config())}
+	e := &Entry{ID: p.nextID(start), Time: start}
 	e.Request = RequestInfo{
 		Method:     r.Method,
 		Path:       r.URL.Path,
@@ -235,7 +235,7 @@ func (p *Panel) servePanel(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "debug panel: reading history: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		writePage(w, r, historyPage(p.app.Config().App.Name, entries))
+		writePage(w, r, historyPage(p.app.Name(), entries))
 	case "/debug/view":
 		e, err := p.load(r.URL.Query().Get("id"))
 		if err != nil {

@@ -2,7 +2,6 @@ package queue
 
 import (
 	"context"
-	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -70,9 +69,7 @@ func TestNewDispatch(t *testing.T) {
 		t.Errorf("default table = %q, want queue", drv.Table())
 	}
 
-	named, err := New(Config{Driver: "db", TableName: "jobs"}, WithDBFunc(func() (*db.Conn, error) {
-		return conn, nil
-	}))
+	named, err := New(Config{Driver: "db", TableName: "jobs"}, WithDB(conn))
 	if err != nil {
 		t.Fatalf("New(db, jobs) error = %v", err)
 	}
@@ -144,8 +141,7 @@ func TestNewRejectsUnknownDriver(t *testing.T) {
 }
 
 // TestNewDbDriverRequiresConnection verifies the db driver without a
-// connection — no option, a nil connection or a failing lazy open — fails
-// construction.
+// connection — no option or a nil connection — fails construction.
 func TestNewDbDriverRequiresConnection(t *testing.T) {
 	if _, err := New(Config{Driver: "db"}); err == nil ||
 		!strings.Contains(err.Error(), "requires the database connection") {
@@ -153,11 +149,6 @@ func TestNewDbDriverRequiresConnection(t *testing.T) {
 	}
 	if _, err := New(Config{Driver: "db"}, WithDB(nil)); err == nil {
 		t.Fatal("New(db) with a nil connection must fail")
-	}
-	boom := errors.New("no server")
-	if _, err := New(Config{Driver: "db"}, WithDBFunc(func() (*db.Conn, error) { return nil, boom })); err == nil ||
-		!errors.Is(err, boom) {
-		t.Fatalf("New(db) with a failing open: err = %v, want wrapped boom", err)
 	}
 }
 
@@ -174,12 +165,10 @@ func TestNewRedisDriverRequiresClient(t *testing.T) {
 }
 
 // TestNewIgnoresForeignDependencies verifies the sync queue never resolves
-// the db or redis dependencies: their lazy providers may fail or be absent —
-// a sync application keeps its zero external dependencies.
+// the db or redis dependencies: a sync application keeps its zero external
+// dependencies even when the options carry values for the other drivers.
 func TestNewIgnoresForeignDependencies(t *testing.T) {
-	mustNotOpen := func() (*db.Conn, error) { return nil, errors.New("must not open a database") }
-	mustNotDial := func() redis.UniversalClient { panic("must not resolve redis") }
-	if _, err := New(Config{}, WithDBFunc(mustNotOpen), WithRedisFunc(mustNotDial)); err != nil {
+	if _, err := New(Config{}, WithDB(nil), WithRedis(nil)); err != nil {
 		t.Fatalf("New(sync) with foreign dependencies: err = %v", err)
 	}
 }

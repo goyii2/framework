@@ -9,9 +9,9 @@ import (
 	"testing"
 
 	"github.com/goyii2/framework/base"
-	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/db"
 	"github.com/goyii2/framework/db/ar"
+	"github.com/goyii2/framework/session"
 	"github.com/goyii2/framework/web"
 )
 
@@ -156,7 +156,7 @@ func newTestContext(t *testing.T) context.Context {
 			t.Fatalf("create table: %v", err)
 		}
 	}
-	app := base.New(config.Config{})
+	app := base.New()
 	app.SetDB(conn)
 	return app.WithContext(context.Background())
 }
@@ -180,17 +180,16 @@ func (u testIdentity) GetRoles() []string { return nil }
 // returns the ready handler plus the plain context for direct queries.
 func newWebApp(t *testing.T, ctx context.Context) http.Handler {
 	t.Helper()
-	app := base.New(config.Config{
-		Web:     config.Web{DisableCsrf: true},
-		Session: config.Session{Backend: "file", Path: t.TempDir()},
-	})
-	conn, err := base.FromContext(ctx).DB()
+	app := base.New()
+	sess, err := session.New(session.Config{Backend: "file", Path: t.TempDir()})
 	if err != nil {
-		t.Fatalf("test connection: %v", err)
+		t.Fatalf("session.New: %v", err)
 	}
+	app.SetSession(sess)
+	conn := base.FromContext(ctx).DB()
 	app.SetDB(conn)
 
-	handler := web.NewHandler(app)
+	handler := web.NewHandler(app, web.WithoutCsrf())
 	users := map[string]testIdentity{
 		"alice": {id: 7}, "bob": {id: 11}, "carol": {id: 42},
 	}

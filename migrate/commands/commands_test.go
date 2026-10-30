@@ -13,8 +13,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/goyii2/framework/base"
-	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/console"
+	"github.com/goyii2/framework/db"
 	"github.com/goyii2/framework/migrate"
 )
 
@@ -41,11 +41,17 @@ var flowMigrations = []migrate.Migration{
 }
 
 // newConsole builds a console with the migrate command tree attached over a
-// sqlite application configuration; run returns the command's error and the
-// captured output.
+// sqlite-backed application (the connection DML shares); run returns the
+// command's error and the captured output.
 func newConsole(t *testing.T, dsn string, migrations []migrate.Migration) (*console.Console, *strings.Builder) {
 	t.Helper()
-	app := base.New(config.Config{DB: config.DB{Driver: "sqlite", DSN: dsn}})
+	app := base.New()
+	conn, err := db.New(db.Config{Driver: "sqlite", DSN: dsn})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	app.SetDB(conn)
 	var out strings.Builder
 	c := console.New(app).AddCommand(New(app, migrations))
 	c.Command().SetOut(&out)
@@ -163,41 +169,6 @@ func TestResolveDriverSupportsEveryRegisteredDialect(t *testing.T) {
 				t.Fatalf("resolveDriver(%q) dialect = %v, want registered %q dialect", name, dialect, name)
 			}
 		})
-	}
-}
-
-func TestResolveTargetAppliesEnvironmentOverrides(t *testing.T) {
-	cfg := config.DB{Driver: "mysql", DSN: "mysql-dsn"}
-
-	driverName, _, dsn, err := resolveTarget(cfg)
-	if err != nil {
-		t.Fatalf("resolveTarget() error = %v", err)
-	}
-	if driverName != "mysql" || dsn != "mysql-dsn" {
-		t.Fatalf("resolveTarget() = %q/%q, want mysql/mysql-dsn", driverName, dsn)
-	}
-
-	t.Setenv("DB_DIALECT", " postgres ")
-	t.Setenv("DB_DSN", "postgres-dsn")
-	driverName, dialect, dsn, err := resolveTarget(cfg)
-	if err != nil {
-		t.Fatalf("resolveTarget() with env overrides error = %v", err)
-	}
-	if driverName != "postgres" || dsn != "postgres-dsn" {
-		t.Fatalf("resolveTarget() = %q/%q, want postgres/postgres-dsn", driverName, dsn)
-	}
-	if _, ok := dialect.(migrate.PostgreSQLDialect); !ok {
-		t.Fatalf("dialect = %T, want migrate.PostgreSQLDialect", dialect)
-	}
-}
-
-func TestResolveTargetRequiresDSN(t *testing.T) {
-	_, _, _, err := resolveTarget(config.DB{Driver: "sqlite"})
-	if err == nil {
-		t.Fatal("resolveTarget() without DSN returned nil error")
-	}
-	if !strings.Contains(err.Error(), "DB_DSN") {
-		t.Errorf("error %q must name the DB_DSN fallback", err)
 	}
 }
 
@@ -425,39 +396,61 @@ func TestMigrateDryRunExecutesNothing(t *testing.T) {
 }
 
 func TestMigrateDSNFromEnvironment(t *testing.T) {
-	// The application configuration carries no DSN; the DB_DSN environment
-	// variable (kept from the standalone yiimigrate CLI) must supply it.
+	// The application entry opens the connection with no DSN of its own; the
+	// DB_DSN environment variable (kept from the standalone yiimigrate CLI)
+	// must supply it — db.New applies the override at open time.
 	dsn := sqliteDSN(t)
-	app := base.New(config.Config{DB: config.DB{Driver: "sqlite"}})
+	app := base.New()
 	t.Setenv("DB_DSN", dsn)
+	conn, err := db.New(db.Config{Driver: "sqlite"})
+	if err != nil {
+		t.Fatalf("open with DB_DSN: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	app.SetDB(conn)
 
 	c := console.New(app).AddCommand(New(app, flowMigrations))
 	c.Command().SetArgs([]string{"migrate", "up"})
 	if err := c.Command().Execute(); err != nil {
-		t.Fatalf("migrate up with DB_DSN error = %v", err)
+		t.Fatalf("migrate up with DB_DSN error: %v", err)
 	}
 	if got := appliedCount(t, dsn); got != 2 {
 		t.Fatalf("migration history after up: %d rows, want 2", got)
 	}
 }
 
-func TestMigrateWithoutDSNFails(t *testing.T) {
-	app := base.New(config.Config{DB: config.DB{Driver: "sqlite"}})
+// TestMigrateWithoutDBPanics verifies the database commands treat a missing
+// db component as the programmer error it is: the panic names the wiring
+// step.
+func TestMigrateWithoutDBPanics(t *testing.T) {
+	app := base.New()
 	c := console.New(app).AddCommand(New(app, flowMigrations))
 	c.Command().SetArgs([]string{"migrate", "up"})
-	err := c.Command().Execute()
-	if err == nil {
-		t.Fatal("migrate up without a DSN returned nil error")
-	}
-	if !strings.Contains(err.Error(), "DB_DSN") {
-		t.Errorf("error %q must name the DB_DSN fallback", err)
-	}
+	c.Command().SetErr(&strings.Builder{})
+
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("migrate up without a db component must panic")
+		}
+		msg, _ := r.(string)
+		if !strings.Contains(msg, "SetDB") {
+			t.Errorf("panic message = %q, want it to name SetDB", msg)
+		}
+	}()
+	_ = c.Command().Execute()
 }
 
-func TestDefaultCreateDialectFollowsConfigAndEnvironment(t *testing.T) {
-	app := base.New(config.Config{DB: config.DB{Driver: "postgres"}})
-	if got := defaultCreateDialect(app); got != "postgres" {
-		t.Fatalf("defaultCreateDialect() = %q, want postgres", got)
+func TestDefaultCreateDialectFollowsConnectionAndEnvironment(t *testing.T) {
+	app := base.New()
+	conn, err := db.New(db.Config{Driver: "sqlite", DSN: sqliteDSN(t)})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	app.SetDB(conn)
+	if got := defaultCreateDialect(app); got != "sqlite" {
+		t.Fatalf("defaultCreateDialect() = %q, want the connection's sqlite", got)
 	}
 
 	t.Setenv("DB_DIALECT", " sqlserver ")

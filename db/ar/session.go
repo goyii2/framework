@@ -2,7 +2,6 @@ package ar
 
 import (
 	"context"
-	"fmt"
 
 	"gorm.io/gorm"
 
@@ -39,11 +38,7 @@ func session(ctx context.Context) (*gorm.DB, error) {
 	} else if conn, ok := ctx.Value(connKey{}).(*db.Conn); ok {
 		handle = conn.DB
 	} else {
-		conn, err := base.FromContext(ctx).DB()
-		if err != nil {
-			return nil, fmt.Errorf("ar: resolve database connection: %w", err)
-		}
-		handle = conn.DB
+		handle = base.FromContext(ctx).DB().DB
 	}
 	return handle.Session(&gorm.Session{NewDB: true, Context: ctx}), nil
 }

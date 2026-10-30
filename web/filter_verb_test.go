@@ -6,13 +6,12 @@ import (
 	"testing"
 
 	"github.com/goyii2/framework/base"
-	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/web"
 )
 
 func TestVerbFilterAllowsListedVerbs(t *testing.T) {
-	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}})
-	h := web.NewHandler(app)
+	app := base.New()
+	h := web.NewHandler(app, web.WithoutCsrf())
 	h.Use(web.VerbFilter{Allowed: []string{"get", "post"}}.Middleware())
 	h.Handle("/thing", func(c *web.Context) error {
 		return c.JSON(map[string]string{"m": c.Request().Method})
@@ -26,8 +25,8 @@ func TestVerbFilterAllowsListedVerbs(t *testing.T) {
 }
 
 func TestVerbFilterRejectsUnlistedVerb405WithAllow(t *testing.T) {
-	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}})
-	h := web.NewHandler(app)
+	app := base.New()
+	h := web.NewHandler(app, web.WithoutCsrf())
 	h.Use(web.VerbFilter{Allowed: []string{"POST", "GET"}}.Middleware())
 	h.Handle("/thing", func(c *web.Context) error { return nil })
 
@@ -46,8 +45,8 @@ func TestVerbFilterRejectsUnlistedVerb405WithAllow(t *testing.T) {
 }
 
 func TestVerbFilterRulesScopeByPath(t *testing.T) {
-	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}})
-	h := web.NewHandler(app)
+	app := base.New()
+	h := web.NewHandler(app, web.WithoutCsrf())
 	h.Use(web.VerbFilter{Rules: []web.VerbRule{
 		{Path: "/api/thing", Verbs: []string{"GET"}},
 	}}.Middleware())
@@ -82,8 +81,8 @@ func TestVerbFilterWorksStandaloneWithoutWebContext(t *testing.T) {
 }
 
 func TestVerbFilterAtControllerLevel(t *testing.T) {
-	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}})
-	h := web.NewHandler(app)
+	app := base.New()
+	h := web.NewHandler(app, web.WithoutCsrf())
 
 	ctrl := verbController{}
 	h.Ctrl(ctrl).Handle("/pay", ctrl.ActionPay)

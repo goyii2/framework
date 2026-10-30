@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/goyii2/framework/base"
-	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/db"
 )
 
@@ -28,7 +27,7 @@ func testApp(t *testing.T, ddl ...string) *base.Application {
 			t.Fatalf("creating the test table: %v", err)
 		}
 	}
-	app := base.New(config.Config{DB: config.DB{Driver: "sqlite"}})
+	app := base.New()
 	app.SetDB(conn)
 	return app
 }

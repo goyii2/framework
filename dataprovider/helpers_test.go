@@ -9,7 +9,6 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 
 	"github.com/goyii2/framework/base"
-	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/db"
 	"github.com/goyii2/framework/db/ar"
 )
@@ -79,7 +78,7 @@ func newActiveTestContext(t *testing.T) (context.Context, *sqlRecorder) {
 	if err := conn.Exec("CREATE TABLE members (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, status INTEGER NOT NULL DEFAULT 1)").Error; err != nil {
 		t.Fatalf("create table: %v", err)
 	}
-	app := base.New(config.Config{})
+	app := base.New()
 	app.SetDB(conn)
 	return app.WithContext(context.Background()), rec
 }
@@ -101,9 +100,6 @@ func seedMembers(t *testing.T, ctx context.Context, n int) {
 }
 
 func execSQL(ctx context.Context, query string, args ...any) error {
-	conn, err := base.FromContext(ctx).DB()
-	if err != nil {
-		return err
-	}
+	conn := base.FromContext(ctx).DB()
 	return conn.Exec(query, args...).Error
 }

@@ -36,8 +36,10 @@ import (
 	"strings"
 
 	"github.com/goyii2/framework/base"
+	"github.com/goyii2/framework/cache"
 	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/console"
+	"github.com/goyii2/framework/db"
 	"github.com/goyii2/framework/db/ar"
 	"github.com/goyii2/framework/debug"
 	"github.com/goyii2/framework/examples/basic/commands"
@@ -47,9 +49,13 @@ import (
 	"github.com/goyii2/framework/examples/basic/models"
 	"github.com/goyii2/framework/examples/basic/views"
 	"github.com/goyii2/framework/i18n"
+	"github.com/goyii2/framework/log"
+	"github.com/goyii2/framework/mail"
 	migratecommands "github.com/goyii2/framework/migrate/commands"
+	"github.com/goyii2/framework/queue"
 	queuecommands "github.com/goyii2/framework/queue/commands"
 	"github.com/goyii2/framework/rbac"
+	"github.com/goyii2/framework/session"
 	"github.com/goyii2/framework/url"
 	"github.com/goyii2/framework/vite"
 	"github.com/goyii2/framework/web"
@@ -62,6 +68,30 @@ import (
 //go:embed messages
 var messages embed.FS
 
+// Config is this project's own configuration: identity and server values of
+// its own plus the parameter bundles of the component packages it uses. The
+// framework's config.LoadAs fills it from config/app.yaml (+ the environment
+// overlay and environment variables); the assembly below turns its values
+// into components.
+type Config struct {
+	App struct {
+		Name  string `yaml:"name"`
+		Debug bool   `yaml:"debug"`
+	} `yaml:"app"`
+	Web struct {
+		Listen string `yaml:"listen"`
+	} `yaml:"web"`
+	DB      db.Config      `yaml:"db"`
+	Queue   queue.Config   `yaml:"queue"`
+	Cache   cache.Config   `yaml:"cache"`
+	Session session.Config `yaml:"session"`
+	I18n    struct {
+		Language string `yaml:"language"`
+	} `yaml:"i18n"`
+	Mail mail.Config `yaml:"mail"`
+	Log  log.Config  `yaml:"log"`
+}
+
 func main() {
 	// runtime/ holds the sqlite database, the log file, session records,
 	// cache entries and the debug panel's request records. SQLite refuses to
@@ -73,11 +103,43 @@ func main() {
 		}
 	}
 
-	cfg, err := config.Load("config")
+	cfg, err := config.LoadAs[Config]("config")
 	if err != nil {
 		fail(err)
 	}
-	app := base.New(cfg)
+
+	// Assembly: every component is constructed eagerly from the project's
+	// configuration and installed on the application; construction errors
+	// end the process here, not somewhere inside a request.
+	logger, err := log.New(cfg.Log)
+	if err != nil {
+		fail(err)
+	}
+	app := base.New(base.WithApp(cfg.App.Name, config.Env(), cfg.App.Debug))
+	app.SetLog(logger)
+	if err := app.ConnectDB(cfg.DB, cfg.Log.Gorm); err != nil {
+		fail(err)
+	}
+	cacheC, err := cache.New(cfg.Cache)
+	if err != nil {
+		fail(err)
+	}
+	app.SetCache(cacheC)
+	mailer, err := mail.New(cfg.Mail, mail.WithLogger(app.Logger().Category("mail")))
+	if err != nil {
+		fail(err)
+	}
+	app.SetMailer(mailer)
+	queueQ, err := queue.New(cfg.Queue, queue.WithDB(app.DB()), app.QueueDispatcher())
+	if err != nil {
+		fail(err)
+	}
+	app.SetQueue(queueQ)
+	sess, err := session.New(cfg.Session)
+	if err != nil {
+		fail(err)
+	}
+	app.SetSession(sess)
 	base.SetDefault(app) // background code without a request context resolves this instance
 	app.SetI18n(i18n.NewMessageSource(messages))
 	// The queue job registry is filled before any command runs: serve pushes
@@ -101,11 +163,7 @@ func main() {
 	// shares the application's connection and carries no code-defined rules
 	// (this example's items are unconditional), which is why NewDbManager
 	// takes none.
-	authConn, err := app.DB()
-	if err != nil {
-		fail(err)
-	}
-	auth, err := rbac.NewDbManager(authConn.DB)
+	auth, err := rbac.NewDbManager(app.DB().DB)
 	if err != nil {
 		fail(err)
 	}
@@ -114,7 +172,7 @@ func main() {
 	views.Register(handler.Views())
 	url.SetDefault(handler.URLs()) // url.To resolves this handler's named routes
 
-	con := console.New(app, console.WithHandler(handler))
+	con := console.New(app, console.WithHandler(handler), console.WithListen(cfg.Web.Listen))
 	con.AddCommand(migratecommands.New(app, migrations.All()))
 	con.AddCommand(queuecommands.New(app))
 	con.AddCommand(commands.NewSeedCommand())

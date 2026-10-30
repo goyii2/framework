@@ -8,23 +8,25 @@ import (
 	"testing/fstest"
 
 	"github.com/goyii2/framework/base"
-	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/i18n"
+	"github.com/goyii2/framework/session"
 )
 
 // languageApp assembles a handler whose one route reports the language the
 // i18n helpers resolve for the request, backed by a two-language source.
 func languageApp(t *testing.T) *Handler {
 	t.Helper()
-	app := base.New(config.Config{
-		Web:     config.Web{DisableCsrf: true},
-		Session: config.Session{Path: t.TempDir()},
-	})
+	app := base.New()
+	sess, err := session.New(session.Config{Path: t.TempDir()})
+	if err != nil {
+		t.Fatalf("session.New: %v", err)
+	}
+	app.SetSession(sess)
 	app.SetI18n(i18n.NewMessageSource(fstest.MapFS{
 		"zh-CN/app.json": &fstest.MapFile{Data: []byte(`{"Hello": "你好"}`)},
 		"de-DE/app.json": &fstest.MapFile{Data: []byte(`{"Hello": "Hallo"}`)},
 	}))
-	h := NewHandler(app)
+	h := NewHandler(app, WithoutCsrf())
 	h.Get("/lang", func(c *Context) error {
 		return c.JSON(map[string]string{"lang": i18n.T(c.Context(), "app", "Hello", nil)})
 	})
@@ -102,7 +104,7 @@ func TestLanguageMiddlewareSessionStickiness(t *testing.T) {
 func TestLanguageMiddlewareWithoutSessionStillResolves(t *testing.T) {
 	// The middleware standalone — no session middleware in front of it: the
 	// language still resolves from the parameter and nothing persists.
-	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}})
+	app := base.New()
 	app.SetI18n(i18n.NewMessageSource(fstest.MapFS{
 		"zh-CN/app.json": &fstest.MapFile{Data: []byte(`{"Hello": "你好"}`)},
 	}))

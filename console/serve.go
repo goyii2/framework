@@ -13,9 +13,8 @@ import (
 )
 
 // newServeCommand builds the built-in serve subcommand: it starts the HTTP
-// handler on the listen address from the application configuration and runs
-// until SIGINT or SIGTERM arrives, then drains in-flight requests before
-// returning.
+// handler on the injected listen address and runs until SIGINT or SIGTERM
+// arrives, then drains in-flight requests before returning.
 func newServeCommand(c *Console) *cobra.Command {
 	return &cobra.Command{
 		Use:   "serve",
@@ -35,7 +34,7 @@ func (c *Console) serve(ctx context.Context) error {
 	if c.handler == nil {
 		return errors.New("console: serve has no HTTP handler; construct the console with console.WithHandler (typically web.NewHandler(app))")
 	}
-	addr := c.app.Config().Web.Listen
+	addr := c.listenAddr
 	ln, err := c.listenFn(addr)
 	if err != nil {
 		return fmt.Errorf("console: listen on %s: %w", addr, err)
@@ -43,7 +42,7 @@ func (c *Console) serve(ctx context.Context) error {
 	defer ln.Close()
 
 	srv := &http.Server{Addr: ln.Addr().String(), Handler: c.handler}
-	c.app.Log().Info("server listening", "addr", ln.Addr().String(), "env", c.app.Config().Env)
+	c.app.Log().Info("server listening", "addr", ln.Addr().String(), "env", c.app.Env())
 
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- srv.Serve(ln) }()

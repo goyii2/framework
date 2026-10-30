@@ -129,24 +129,19 @@ func generationOptions(cmd *cobra.Command) gii.Options {
 }
 
 // openConn resolves the database connection: the application's db component
-// by default, a fresh one when --dsn overrides the configured DSN. The
-// returned cleanup closes the fresh connection (nil when the component's
-// connection was reused — its lifetime belongs to the application).
+// by default, a fresh one when --dsn overrides the DSN (the driver follows
+// the application's connection). The returned cleanup closes the fresh
+// connection (nil when the component's connection was reused — its lifetime
+// belongs to the application).
 func openConn(app *base.Application, cmd *cobra.Command) (*db.Conn, func(), error) {
 	dsn, err := cmd.Flags().GetString("dsn")
 	if err != nil {
 		return nil, nil, err
 	}
 	if dsn == "" {
-		conn, err := app.DB()
-		if err != nil {
-			return nil, nil, err
-		}
-		return conn, nil, nil
+		return app.DB(), nil, nil
 	}
-	cfg := app.Config().DB
-	cfg.DSN = dsn
-	conn, err := db.New(db.Config{Driver: cfg.Driver, DSN: cfg.DSN})
+	conn, err := db.New(db.Config{Driver: app.DB().Driver(), DSN: dsn})
 	if err != nil {
 		return nil, nil, err
 	}

@@ -6,7 +6,6 @@ package commands
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"os"
 	"strconv"
@@ -19,18 +18,16 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/goyii2/framework/base"
-	"github.com/goyii2/framework/config"
-	"github.com/goyii2/framework/db"
 	"github.com/goyii2/framework/migrate"
 	"github.com/goyii2/framework/migrate/internal/generator"
 )
 
 // New returns the "migrate" parent command with the eight subcommands.
-// Database commands resolve their connection from the application's db
-// configuration section; the DB_DSN and DB_DIALECT environment variables
-// (and MIGRATE_TABLE / MIGRATE_DRY_RUN) keep their effect from the
-// standalone yiimigrate CLI. migrations is the application's registered
-// migration list, typically migrations.All().
+// The database commands run on the application's db component (app.DB, the
+// connection DML shares), so the dialect follows the opened connection; the
+// MIGRATE_TABLE / MIGRATE_DRY_RUN environment variables keep their effect
+// from the standalone yiimigrate CLI. migrations is the application's
+// registered migration list, typically migrations.All().
 func New(app *base.Application, migrations []migrate.Migration) *cobra.Command {
 	root := &cobra.Command{
 		Use:   "migrate",
@@ -81,50 +78,29 @@ func unsupportedDialectError(name string) error {
 	return fmt.Errorf("unsupported db dialect %q; supported values: %s", name, strings.Join(migrate.DialectNames(), ", "))
 }
 
-// resolveTarget turns the application's db configuration plus the
-// DB_DSN / DB_DIALECT environment overrides into the driver name, dialect
-// and DSN the database commands operate on. Either non-empty environment
-// variable wins over the configuration value.
-func resolveTarget(cfg config.DB) (driverName string, dialect migrate.Dialect, dsn string, err error) {
-	name := cfg.Driver
-	if value := strings.TrimSpace(os.Getenv("DB_DIALECT")); value != "" {
-		name = value
-	}
-	driverName, dialect, err = resolveDriver(name)
-	if err != nil {
-		return "", nil, "", err
-	}
-	dsn = cfg.DSN
-	if value := os.Getenv(db.DSNEnvVar); value != "" {
-		dsn = value
-	}
-	if dsn == "" {
-		return "", nil, "", fmt.Errorf("database DSN is required: set db.dsn in the configuration or the %s environment variable", db.DSNEnvVar)
-	}
-	return driverName, dialect, dsn, nil
-}
-
-// openMigrator opens the database/sql connection for cfg and builds the
-// migrator over the application's migrations. The caller closes the
-// connection. The sqlite driver is the pure-Go glebarez driver — the same
+// openMigrator resolves the migrator over the application's db component:
+// the connection DML shares, its dialect following the opened connection's
+// driver. The connection's lifetime belongs to the application — callers do
+// not close it. The sqlite driver is the pure-Go glebarez driver — the same
 // registration the db component's GORM layer uses — so both layers coexist
 // in one binary without duplicate driver registrations.
-func openMigrator(cfg config.DB, migrations []migrate.Migration) (*sql.DB, *migrate.Migrator, error) {
-	driverName, dialect, dsn, err := resolveTarget(cfg)
+func openMigrator(app *base.Application, migrations []migrate.Migration) (*migrate.Migrator, error) {
+	conn := app.DB()
+	_, dialect, err := resolveDriver(conn.Driver())
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	conn, err := sql.Open(driverName, dsn)
+	sqlDB, err := conn.DB.DB()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	migrator := migrate.NewMigrator(conn, dialect, migrations)
+	migrator := migrate.NewMigrator(sqlDB, dialect, migrations)
 	if table := os.Getenv("MIGRATE_TABLE"); table != "" {
 		migrator.MigrationTable = table
 	}
 	migrator.DryRun = envBool("MIGRATE_DRY_RUN")
 	migrator.UseLock = dialectLockable(dialect)
-	return conn, migrator, nil
+	return migrator, nil
 }
 
 // dialectLockable reports whether the dialect supports advisory migration
@@ -155,11 +131,10 @@ func newLimitCommand(app *base.Application, migrations []migrate.Migration, use,
 		Short: short,
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			conn, migrator, err := openMigrator(app.Config().DB, migrations)
+			migrator, err := openMigrator(app, migrations)
 			if err != nil {
 				return err
 			}
-			defer conn.Close()
 			return fn(cmd.Context(), cmd, migrator, optionalInt(args, fallback))
 		},
 	}
@@ -211,11 +186,10 @@ func newMarkCommand(app *base.Application, migrations []migrate.Migration) *cobr
 		Short: "Modify the migration history without running migrations",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			conn, migrator, err := openMigrator(app.Config().DB, migrations)
+			migrator, err := openMigrator(app, migrations)
 			if err != nil {
 				return err
 			}
-			defer conn.Close()
 			return migrator.Mark(cmd.Context(), args[0])
 		},
 	}
@@ -229,11 +203,10 @@ func newToCommand(app *base.Application, migrations []migrate.Migration) *cobra.
 		Short: "Migrate up or down until VERSION is the latest applied migration",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			conn, migrator, err := openMigrator(app.Config().DB, migrations)
+			migrator, err := openMigrator(app, migrations)
 			if err != nil {
 				return err
 			}
-			defer conn.Close()
 			return migrator.To(cmd.Context(), args[0])
 		},
 	}
@@ -242,7 +215,7 @@ func newToCommand(app *base.Application, migrations []migrate.Migration) *cobra.
 // newCreateCommand builds "migrate create NAME": it writes a migration file
 // named after the current timestamp plus NAME into the migrations directory
 // of the working directory. The generated code imports this framework's
-// migrate package; --dialect defaults to the application's configured
+// migrate package; --dialect defaults to the application connection's
 // dialect so templates match the target database.
 func newCreateCommand(app *base.Application) *cobra.Command {
 	cmd := &cobra.Command{
@@ -257,6 +230,9 @@ func newCreateCommand(app *base.Application) *cobra.Command {
 			dialect, err := cmd.Flags().GetString("dialect")
 			if err != nil {
 				return err
+			}
+			if dialect == "" {
+				dialect = defaultCreateDialect(app)
 			}
 			path, err := generator.Generate(generator.Options{
 				Name:        args[0],
@@ -273,19 +249,19 @@ func newCreateCommand(app *base.Application) *cobra.Command {
 		},
 	}
 	cmd.Flags().String("fields", "", "comma-separated column definitions for the generated migration")
-	cmd.Flags().String("dialect", defaultCreateDialect(app), "target dialect for the generated template")
+	cmd.Flags().String("dialect", "", "target dialect for the generated template (default: DB_DIALECT, then the application connection's driver)")
 	return cmd
 }
 
 // defaultCreateDialect resolves the dialect the create command targets: the
 // DB_DIALECT environment variable when set (its behavior in the standalone
-// CLI), otherwise the application's configured db driver, otherwise empty —
-// which the generator itself defaults to mysql.
+// CLI), otherwise the application connection's driver — which the generator
+// itself defaults to mysql when the application carries none.
 func defaultCreateDialect(app *base.Application) string {
 	if value := strings.TrimSpace(os.Getenv("DB_DIALECT")); value != "" {
 		return value
 	}
-	return app.Config().DB.Driver
+	return app.DB().Driver()
 }
 
 // optionalInt parses args[0] as the command limit, falling back to fallback

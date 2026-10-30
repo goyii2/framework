@@ -2,26 +2,33 @@ package base
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
-	"github.com/goyii2/framework/config"
+	"github.com/goyii2/framework/log"
 	"github.com/goyii2/framework/mail"
 )
 
+// TestApplicationMailerDefaultsToLog verifies the fallback mailer records
+// through the log component under the mail category — following a logger
+// installed after construction.
 func TestApplicationMailerDefaultsToLog(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "mail.log")
-	app := New(config.Config{
-		Log: config.Log{Targets: []config.LogTarget{{Type: "file", Path: logPath}}},
+	logger, err := log.New(log.Config{
+		Targets: []log.TargetConfig{{Type: "file", Path: logPath}},
 	})
+	if err != nil {
+		t.Fatalf("log.New: %v", err)
+	}
+	app := New()
+	app.SetLog(logger)
 	t.Cleanup(func() { _ = app.Logger().Close() })
 
 	first := app.Mailer()
 	if _, ok := first.(*mail.LogMailer); !ok {
-		t.Fatalf("unconfigured Mailer() = %T, want *mail.LogMailer", first)
+		t.Fatalf("fallback Mailer() = %T, want *mail.LogMailer", first)
 	}
 	if app.Mailer() != first {
 		t.Error("repeated Mailer() returned a different instance")
@@ -29,7 +36,7 @@ func TestApplicationMailerDefaultsToLog(t *testing.T) {
 
 	// The log mailer records through the application's log component under
 	// the mail category; nothing is sent.
-	err := first.Send(context.Background(), mail.NewMessage().
+	err = first.Send(context.Background(), mail.NewMessage().
 		SetFrom("Ada <ada@example.com>").
 		SetTo("grace@example.com").
 		SetSubject("Welcome aboard").
@@ -38,11 +45,11 @@ func TestApplicationMailerDefaultsToLog(t *testing.T) {
 		t.Fatalf("Send: %v", err)
 	}
 
-	data, err := os.ReadFile(logPath)
+	data, err := readFile(logPath)
 	if err != nil {
 		t.Fatalf("reading the log target: %v", err)
 	}
-	if !strings.Contains(string(data), "[mail]") || !strings.Contains(string(data), "Subject: Welcome aboard") {
+	if !strings.Contains(data, "[mail]") || !strings.Contains(data, "Subject: Welcome aboard") {
 		t.Errorf("logged mail record missing category or content; got:\n%s", data)
 	}
 }
@@ -69,7 +76,7 @@ func (f *fakeMailer) count() int {
 // TestApplicationSetMailerFake verifies the injection point: unit tests
 // install a fake and assert on captured messages without any transport.
 func TestApplicationSetMailerFake(t *testing.T) {
-	app := New(config.Default())
+	app := New()
 
 	fake := &fakeMailer{}
 	app.SetMailer(fake)
@@ -83,43 +90,25 @@ func TestApplicationSetMailerFake(t *testing.T) {
 
 	app.SetMailer(nil)
 	if _, ok := app.Mailer().(*mail.LogMailer); !ok {
-		t.Error("SetMailer(nil) must restore lazy initialization from the configuration")
+		t.Error("SetMailer(nil) must restore the log-mailer fallback")
 	}
 }
 
-// TestApplicationMailerSmtpWithoutHostFallsBackToLog checks the transition
-// through the component holder: an smtp section the constructor rejects
-// (here: no host) degrades to the log mailer with a warning, instead of a
-// mailer that fails on every Send.
-func TestApplicationMailerSmtpWithoutHostFallsBackToLog(t *testing.T) {
-	app := New(config.Config{Mail: config.Mail{Driver: "smtp"}})
+// TestApplicationMailerReplacedByConfiguredMailer verifies a mailer the
+// project's configuration selects installs cleanly.
+func TestApplicationMailerReplacedByConfiguredMailer(t *testing.T) {
+	app := New()
 
-	if _, ok := app.Mailer().(*mail.LogMailer); !ok {
-		t.Fatalf("Mailer() through a rejected smtp section is %T, want the log-mailer fallback", app.Mailer())
-	}
-	err := app.Mailer().Send(context.Background(),
-		mail.NewMessage().SetFrom("ada@example.com").SetTo("g@example.com").SetTextBody("hi"))
+	m, err := mail.New(mail.Config{
+		Driver: "smtp",
+		From:   "Robot <noreply@example.com>",
+		SMTP:   mail.SMTPConfig{Host: "mail.example.com", Port: 2525, Encryption: "none"},
+	}, mail.WithLogger(app.Logger().Category("mail")))
 	if err != nil {
-		t.Fatalf("Send through the fallback: %v", err)
+		t.Fatalf("mail.New(smtp): %v", err)
 	}
-}
-
-// TestApplicationMailerConcurrentAccess exercises lazy initialization and
-// replacement of the mailer from many goroutines; run with -race.
-func TestApplicationMailerConcurrentAccess(t *testing.T) {
-	app := New(config.Default())
-
-	var wg sync.WaitGroup
-	for i := 0; i < 64; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			m := app.Mailer()
-			if i%4 == 0 {
-				app.SetMailer(&fakeMailer{})
-			}
-			_ = m
-		}(i)
+	app.SetMailer(m)
+	if app.Mailer() != m {
+		t.Error("SetMailer must install the constructed mailer")
 	}
-	wg.Wait()
 }

@@ -16,7 +16,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/goyii2/framework/base"
-	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/log"
 	"github.com/goyii2/framework/web"
 )
@@ -91,23 +90,21 @@ func (siteController) ActionHello(c *web.Context) error {
 
 // newTestApp builds an application listening on an ephemeral port with the
 // recorded log installed, the shared wiring every serve test starts from.
-func newTestApp() (*base.Application, *recordedLog, config.Config) {
-	cfg := config.Default()
-	cfg.Web.Listen = "127.0.0.1:0"
-	app := base.New(cfg)
+func newTestApp() (*base.Application, *recordedLog) {
+	app := base.New()
 	log := &recordedLog{}
 	app.SetLog(log)
-	return app, log, cfg
+	return app, log
 }
 
 func TestServeServesRequestsThroughSharedApplication(t *testing.T) {
-	app, log, _ := newTestApp()
+	app, log := newTestApp()
 	if err := app.RegisterController("site", siteController{}); err != nil {
 		t.Fatalf("register controller: %v", err)
 	}
 	h := web.NewHandler(app) // one application shared by handler and console
 
-	c := New(app, WithHandler(h))
+	c := New(app, WithHandler(h), WithListen("127.0.0.1:0"))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	errCh := make(chan error, 1)
@@ -148,7 +145,7 @@ func TestServeServesRequestsThroughSharedApplication(t *testing.T) {
 }
 
 func TestServeGracefulShutdownWaitsForInFlightRequest(t *testing.T) {
-	app, log, cfg := newTestApp()
+	app, log := newTestApp()
 
 	h := web.NewHandler(app)
 	entered := make(chan struct{}, 1)
@@ -160,7 +157,7 @@ func TestServeGracefulShutdownWaitsForInFlightRequest(t *testing.T) {
 		return err
 	})
 
-	c := New(app, WithHandler(h), WithShutdownTimeout(5*time.Second))
+	c := New(app, WithHandler(h), WithListen("127.0.0.1:0"), WithShutdownTimeout(5*time.Second))
 
 	// Capture which address serve asks the listener for; it must be the one
 	// from the application configuration.
@@ -183,9 +180,9 @@ func TestServeGracefulShutdownWaitsForInFlightRequest(t *testing.T) {
 
 	addr := log.waitForArg(t, "server listening", "addr")
 	mu.Lock()
-	if requested != cfg.Web.Listen {
+	if requested != "127.0.0.1:0" {
 		mu.Unlock()
-		t.Fatalf("listen address = %q, want config value %q", requested, cfg.Web.Listen)
+		t.Fatalf("listen address = %q, want the injected value 127.0.0.1:0", requested)
 	}
 	mu.Unlock()
 
@@ -240,7 +237,7 @@ func TestServeGracefulShutdownWaitsForInFlightRequest(t *testing.T) {
 }
 
 func TestServeShutdownTimeoutFailsTheCommand(t *testing.T) {
-	app, log, _ := newTestApp()
+	app, log := newTestApp()
 
 	h := web.NewHandler(app)
 	entered := make(chan struct{}, 1)
@@ -252,7 +249,7 @@ func TestServeShutdownTimeoutFailsTheCommand(t *testing.T) {
 		return nil
 	})
 
-	c := New(app, WithHandler(h), WithShutdownTimeout(50*time.Millisecond))
+	c := New(app, WithHandler(h), WithListen("127.0.0.1:0"), WithShutdownTimeout(50*time.Millisecond))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	errCh := make(chan error, 1)
@@ -283,9 +280,7 @@ func TestServeShutdownTimeoutFailsTheCommand(t *testing.T) {
 }
 
 func TestUserCommandsRegisterBelowRootAndReachApplication(t *testing.T) {
-	cfg := config.Default()
-	cfg.Env = "staging"
-	app := base.New(cfg)
+	app := base.New(base.WithApp("console-test", "staging", false))
 
 	var (
 		ran     bool
@@ -312,13 +307,13 @@ func TestUserCommandsRegisterBelowRootAndReachApplication(t *testing.T) {
 	if fromCtx != app {
 		t.Fatal("command context does not carry the console's application")
 	}
-	if got := fromCtx.Config().Env; got != "staging" {
-		t.Fatalf("env = %q, want the value from the shared config", got)
+	if got := fromCtx.Env(); got != "staging" {
+		t.Fatalf("env = %q, want the identity value", got)
 	}
 }
 
 func TestHelpListsBuiltInAndUserCommands(t *testing.T) {
-	c := New(base.New(config.Default()))
+	c := New(base.New())
 	c.AddCommand(&cobra.Command{
 		Use:   "greet",
 		Short: "Greet the user",
@@ -347,7 +342,7 @@ func TestHelpListsBuiltInAndUserCommands(t *testing.T) {
 }
 
 func TestServeWithoutHandlerReportsSetupError(t *testing.T) {
-	c := New(base.New(config.Default()))
+	c := New(base.New())
 	c.Command().SetArgs([]string{"serve"})
 	c.Command().SetErr(io.Discard)
 	err := c.Execute()
@@ -365,7 +360,7 @@ func TestExecuteClosesLogTargets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open file target: %v", err)
 	}
-	app := base.New(config.Default())
+	app := base.New()
 	app.SetLog(log.NewWithTargets(slog.LevelInfo, target))
 
 	ran := false

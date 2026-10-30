@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/goyii2/framework/cache"
-	"github.com/goyii2/framework/config"
 )
 
 // recordingCache is a fake Cache that counts the calls reaching it, proving
@@ -45,30 +44,39 @@ func (r *recordingCache) GetOrSet(ctx context.Context, key string, dest any, bui
 	return nil
 }
 
-func TestApplicationCacheLazyDefault(t *testing.T) {
-	app := New(config.Default())
+func TestApplicationCacheDefaultIsMemory(t *testing.T) {
+	app := New()
 
-	first := app.Cache()
-	if first == nil {
-		t.Fatal("Cache() returned nil before initialization")
+	if _, ok := app.Cache().(*cache.Memory); !ok {
+		t.Fatalf("default driver must be the memory backend, got %T", app.Cache())
 	}
-	if app.Cache() != first {
+	if app.Cache() != app.Cache() {
 		t.Error("repeated Cache() returned a different instance")
 	}
-	if _, ok := first.(*cache.Memory); !ok {
-		t.Errorf("default driver must be the memory backend, got %T", first)
+}
+
+func TestApplicationCacheReplacedByConfiguredBackend(t *testing.T) {
+	app := New()
+
+	// The backend the project's configuration selects installs through the
+	// component package's constructor.
+	fileCache, err := cache.New(cache.Config{Driver: "file", Path: t.TempDir(), TTL: 60})
+	if err != nil {
+		t.Fatalf("cache.New(file): %v", err)
+	}
+	app.SetCache(fileCache)
+	if _, ok := app.Cache().(*cache.File); !ok {
+		t.Errorf("installed cache = %T, want *cache.File", app.Cache())
 	}
 
-	// The default backend must honor the cache configuration.
-	dir := t.TempDir()
-	fileApp := New(config.Config{Cache: config.Cache{Driver: "file", Path: dir, TTL: 60}})
-	if _, ok := fileApp.Cache().(*cache.File); !ok {
-		t.Errorf("driver file must build the file backend, got %T", fileApp.Cache())
+	app.SetCache(nil)
+	if _, ok := app.Cache().(*cache.Memory); !ok {
+		t.Error("SetCache(nil) must restore the memory fallback")
 	}
 }
 
 func TestApplicationSetCacheFake(t *testing.T) {
-	app := New(config.Default())
+	app := New()
 
 	fake := &recordingCache{}
 	app.SetCache(fake)
@@ -86,10 +94,5 @@ func TestApplicationSetCacheFake(t *testing.T) {
 	}
 	if fake.gets != 1 || fake.sets != 1 || fake.getOrSets != 1 {
 		t.Errorf("fake calls: gets=%d sets=%d getOrSets=%d, want 1/1/1", fake.gets, fake.sets, fake.getOrSets)
-	}
-
-	app.SetCache(nil)
-	if _, ok := app.Cache().(*cache.Memory); !ok {
-		t.Error("SetCache(nil) must restore the default cache component")
 	}
 }

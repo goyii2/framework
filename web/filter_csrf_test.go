@@ -8,14 +8,13 @@ import (
 	"testing"
 
 	"github.com/goyii2/framework/base"
-	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/web"
 )
 
 // csrfApp builds a default-configuration application (CSRF on, the
 // documented default) exposing GET /form (token echo) and POST /submit.
 func csrfApp() *web.Handler {
-	app := base.New(config.Default())
+	app := base.New()
 	h := web.NewHandler(app)
 	h.Get("/form", func(c *web.Context) error {
 		return c.JSON(map[string]string{"token": c.CsrfToken()})
@@ -162,8 +161,8 @@ func TestCsrfQueryTokenIsNotAccepted(t *testing.T) {
 }
 
 func TestCsrfDisabledGloballyByConfiguration(t *testing.T) {
-	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}})
-	h := web.NewHandler(app)
+	app := base.New()
+	h := web.NewHandler(app, web.WithoutCsrf())
 	h.Post("/submit", func(c *web.Context) error {
 		return c.JSONStatus(http.StatusCreated, map[string]string{"ok": "yes"})
 	})
@@ -179,8 +178,8 @@ func TestCsrfDisabledGloballyByConfiguration(t *testing.T) {
 func TestCsrfDisabledFlagSkipsHandMountedFilter(t *testing.T) {
 	// The Disabled flag is for applications that mount the filter by hand
 	// (global default off) and want one chain branch without validation.
-	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}})
-	h := web.NewHandler(app)
+	app := base.New()
+	h := web.NewHandler(app, web.WithoutCsrf())
 	h.Use(web.Csrf{Disabled: true}.Middleware())
 	h.Post("/submit", func(c *web.Context) error {
 		return c.JSONStatus(http.StatusCreated, map[string]string{"ok": "yes"})

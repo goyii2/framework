@@ -5,12 +5,10 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-
-	"github.com/goyii2/framework/config"
 )
 
 func TestEventTriggerDeliversEventAndContext(t *testing.T) {
-	app := New(config.Default())
+	app := New()
 	type payload struct{ Path string }
 
 	ctx := app.WithContext(context.Background())
@@ -35,7 +33,7 @@ func TestEventTriggerDeliversEventAndContext(t *testing.T) {
 }
 
 func TestEventHandlersRunInRegistrationOrder(t *testing.T) {
-	app := New(config.Default())
+	app := New()
 
 	var calls []string
 	for _, tag := range []string{"a", "b", "c"} {
@@ -52,7 +50,7 @@ func TestEventHandlersRunInRegistrationOrder(t *testing.T) {
 }
 
 func TestEventOffUnsubscribesOnlyTargetHandler(t *testing.T) {
-	app := New(config.Default())
+	app := New()
 
 	var calls []string
 	app.On(EventName("tick"), func(ctx context.Context, e Event) {
@@ -77,7 +75,7 @@ func TestEventOffUnsubscribesOnlyTargetHandler(t *testing.T) {
 // while dispatch is in flight; the current dispatch still completes the
 // snapshot it started with, and changes apply from the next trigger on.
 func TestEventOffDuringDispatchTakesEffectNextTrigger(t *testing.T) {
-	app := New(config.Default())
+	app := New()
 
 	var calls []string
 	app.On(EventName("tick"), func(ctx context.Context, e Event) {
@@ -107,7 +105,7 @@ func TestEventOffDuringDispatchTakesEffectNextTrigger(t *testing.T) {
 }
 
 func TestEventTriggerWithoutSubscribersIsNoop(t *testing.T) {
-	app := New(config.Default())
+	app := New()
 
 	off := app.On(EventName("ephemeral"), func(ctx context.Context, e Event) {})
 	off()
@@ -125,7 +123,7 @@ func TestLifecycleEventsSimulatedRequestTrigger(t *testing.T) {
 			EventBeforeRequest, EventAfterRequest, "beforeRequest", "afterRequest")
 	}
 
-	app := New(config.Default())
+	app := New()
 	ctx := app.WithContext(context.Background())
 
 	var seen []EventName
@@ -154,7 +152,7 @@ func TestLifecycleEventsSimulatedRequestTrigger(t *testing.T) {
 // are cancelled immediately, so once everything quiesces exactly the stable
 // subscribers receive a final trigger.
 func TestEventConcurrentSubscribeTriggerOff(t *testing.T) {
-	app := New(config.Default())
+	app := New()
 	name := EventName("custom")
 
 	var delivered atomic.Int64

@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/goyii2/framework/base"
-	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/web"
 )
 
@@ -36,8 +35,8 @@ func (s *checkerStub) CheckAccess(userID string, itemName string, params map[str
 // authorization backend.
 func authzApp(t *testing.T, checker web.AccessChecker) *web.Handler {
 	t.Helper()
-	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}})
-	h := web.NewHandler(app)
+	app := base.New()
+	h := web.NewHandler(app, web.WithoutCsrf())
 	h.SetAuthManager(checker)
 	h.Use(web.HttpBasic{Authenticate: staticBasicAuth()}.Middleware())
 
@@ -97,8 +96,8 @@ func TestUserCanAsksTheAuthManager(t *testing.T) {
 }
 
 func TestUserCanWithoutCheckerDenies(t *testing.T) {
-	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}})
-	h := web.NewHandler(app) // no SetAuthManager
+	app := base.New()
+	h := web.NewHandler(app, web.WithoutCsrf()) // no SetAuthManager
 	h.Get("/gate", func(c *web.Context) error {
 		return c.JSON(map[string]bool{"can": c.User().Can("admin")})
 	})
@@ -145,8 +144,8 @@ func TestAccessControlChecksRolesThroughAuthManager(t *testing.T) {
 		// bob's identity role is admin, but the backend says he holds
 		// nothing: with a checker installed, the backend decides.
 	}}
-	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}})
-	h := web.NewHandler(app)
+	app := base.New()
+	h := web.NewHandler(app, web.WithoutCsrf())
 	g := gatekeeper{Auth: checker}
 	h.Ctrl(g).Post("/gate/purge", g.ActionPurge)
 
@@ -174,11 +173,9 @@ func TestAccessControlAuthBackendKeepsSpecialRoles(t *testing.T) {
 	// "?" and "@" keep their guest/authenticated meaning with a checker
 	// installed: sessions authenticate, the backend plays no part in it.
 	checker := &checkerStub{held: map[string][]string{}}
-	app := base.New(config.Config{
-		Web:     config.Web{DisableCsrf: true},
-		Session: fileSessionConfig(t),
-	})
-	h := web.NewHandler(app)
+	app := base.New()
+	app.SetSession(fileSessionManager(t))
+	h := web.NewHandler(app, web.WithoutCsrf())
 	h.SetAuthManager(checker)
 	h.SessionManager().IdentityFinder = func(id string) (web.Identity, bool) {
 		if id == alice.GetID() {
@@ -220,8 +217,8 @@ func TestAccessControlAuthBackendKeepsSpecialRoles(t *testing.T) {
 
 func TestAccessControlAuthBackendFailureIsServerError(t *testing.T) {
 	checker := &checkerStub{err: errors.New("rule registry misaligned")}
-	app := base.New(config.Config{Web: config.Web{DisableCsrf: true}})
-	h := web.NewHandler(app)
+	app := base.New()
+	h := web.NewHandler(app, web.WithoutCsrf())
 	g := gatekeeper{Auth: checker}
 	h.Ctrl(g).Post("/gate/purge", g.ActionPurge)
 

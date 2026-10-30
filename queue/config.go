@@ -29,12 +29,11 @@ type Config struct {
 // Config. Both New and NewWithDriver take them.
 type Option func(*options)
 
-// options accumulates what the options set. The db and redis dependencies
-// are resolution functions so a queue whose driver needs neither never
-// touches them — WithDBFunc installs a lazily opening one.
+// options accumulates what the options set: the driver dependencies, the
+// event dispatcher and a programmatic poll interval override.
 type options struct {
-	db     func() (*db.Conn, error)
-	redis  func() redis.UniversalClient
+	db     *db.Conn
+	redis  redis.UniversalClient
 	events Dispatcher
 	poll   time.Duration
 }
@@ -44,17 +43,7 @@ type options struct {
 // same data the pushing request committed. The sync and redis drivers
 // ignore it.
 func WithDB(conn *db.Conn) Option {
-	return func(o *options) {
-		o.db = func() (*db.Conn, error) { return conn, nil }
-	}
-}
-
-// WithDBFunc is the lazy WithDB: New opens the connection through open when
-// (and only when) the db driver needs it, so the sync and redis drivers
-// never open a database. Applications assembling from a retryable holder
-// (db.Component.Get) pass it directly.
-func WithDBFunc(open func() (*db.Conn, error)) Option {
-	return func(o *options) { o.db = open }
+	return func(o *options) { o.db = conn }
 }
 
 // WithRedis hands the queue the application's shared redis client for the
@@ -62,16 +51,7 @@ func WithDBFunc(open func() (*db.Conn, error)) Option {
 // processes and a private client would hand out messages nobody else sees.
 // The sync and db drivers ignore it.
 func WithRedis(client redis.UniversalClient) Option {
-	return func(o *options) {
-		o.redis = func() redis.UniversalClient { return client }
-	}
-}
-
-// WithRedisFunc is the lazy WithRedis: New resolves the client through get
-// when (and only when) the redis driver needs it, so the sync and db
-// drivers never touch the redis connection.
-func WithRedisFunc(get func() redis.UniversalClient) Option {
-	return func(o *options) { o.redis = get }
+	return func(o *options) { o.redis = client }
 }
 
 // WithDispatcher routes the five lifecycle events through d.
@@ -107,42 +87,12 @@ func pollOf(cfg Config) time.Duration {
 }
 
 // errDBRequired is the construction error of a db driver whose connection
-// dependency is absent (no option, or a nil resolution).
+// dependency is absent.
 var errDBRequired = errors.New("queue: db driver requires the database connection (pass one with WithDB)")
 
 // errRedisRequired is the construction error of a redis driver whose client
-// dependency is absent (no option, or a nil resolution).
+// dependency is absent.
 var errRedisRequired = errors.New("queue: redis driver requires a redis client (pass one with WithRedis)")
-
-// resolveDB resolves the db driver's connection requirement: a nil provider
-// or nil connection is the same missing dependency, a failing open keeps its
-// cause.
-func resolveDB(get func() (*db.Conn, error)) (*db.Conn, error) {
-	if get == nil {
-		return nil, errDBRequired
-	}
-	conn, err := get()
-	if err != nil {
-		return nil, fmt.Errorf("queue: db driver needs the database connection: %w", err)
-	}
-	if conn == nil {
-		return nil, errDBRequired
-	}
-	return conn, nil
-}
-
-// resolveRedis resolves the redis driver's client requirement: a nil
-// provider or nil client is the same missing dependency.
-func resolveRedis(get func() redis.UniversalClient) (redis.UniversalClient, error) {
-	if get == nil {
-		return nil, errRedisRequired
-	}
-	client := get()
-	if client == nil {
-		return nil, errRedisRequired
-	}
-	return client, nil
-}
 
 // New builds the queue Config selects: "sync" (also the empty default)
 // executes jobs inline on push, "db" stores messages in a relational table
@@ -150,8 +100,8 @@ func resolveRedis(get func() redis.UniversalClient) (redis.UniversalClient, erro
 // "redis" keeps them in redis over the client injected with WithRedis.
 // Omitted values fall back to the defaults: the "queue" table name and the
 // one-second listen poll interval. A driver Config cannot name — or a
-// dependency its driver needs but no option injected, or one whose lazy
-// resolution fails — returns an error instead of a queue.
+// dependency its driver needs but no option injected — returns an error
+// instead of a queue.
 func New(cfg Config, opts ...Option) (*Queue, error) {
 	var o options
 	applyOptions(opts, &o)
@@ -160,17 +110,15 @@ func New(cfg Config, opts ...Option) (*Queue, error) {
 	case "", "sync":
 		return newOverDriver(NewSync(), nil, o, poll), nil
 	case "db":
-		conn, err := resolveDB(o.db)
-		if err != nil {
-			return nil, err
+		if o.db == nil {
+			return nil, errDBRequired
 		}
-		return newOverDriver(NewDB(conn.DB, cfg.TableName), nil, o, poll), nil
+		return newOverDriver(NewDB(o.db.DB, cfg.TableName), nil, o, poll), nil
 	case "redis":
-		client, err := resolveRedis(o.redis)
-		if err != nil {
-			return nil, err
+		if o.redis == nil {
+			return nil, errRedisRequired
 		}
-		return newOverDriver(NewRedis(client, ""), nil, o, poll), nil
+		return newOverDriver(NewRedis(o.redis, ""), nil, o, poll), nil
 	default:
 		return nil, fmt.Errorf("queue: unknown driver %q (want sync, db or redis)", cfg.Driver)
 	}
