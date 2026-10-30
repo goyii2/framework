@@ -1,0 +1,85 @@
+// The templ components of the frontend partition. The advanced example
+// deliberately ships no translations — plain strings here; the basic
+// example covers i18n. (The templ package needs no import here — the
+// generator adds it for every template that references it.)
+package views
+
+// shellData is the chrome of every framed page, assembled at render time
+// from the request's context.
+type shellData struct {
+	AppName  string
+	LoginURL string
+}
+
+templ shell(nav shellData, title string, content templ.Component) {
+	<!DOCTYPE html>
+	<html lang="en">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>{ title }</title>
+			<style>
+				:root { font-family: system-ui, sans-serif; color: #1f2937; background: #f8fafc; }
+				body { margin: 0; }
+				a { color: #1a5fb4; }
+				header { display: flex; align-items: center; gap: 1.5rem; padding: 0.6rem 1.2rem; background: #ffffff; border-bottom: 1px solid #e2e8f0; flex-wrap: wrap; }
+				.brand { font-weight: 700; color: #0f172a; }
+				header nav { display: flex; gap: 1rem; }
+				header nav a { text-decoration: none; color: #334155; }
+				header nav a.active { color: #1a5fb4; font-weight: 600; }
+				.session { margin-left: auto; }
+				.session a { text-decoration: none; }
+				main { max-width: 60rem; margin: 1.5rem auto; padding: 0 1rem; }
+				footer { text-align: center; color: #94a3b8; padding: 1rem; font-size: 0.85rem; }
+				.status { display: inline-block; margin: 0.15rem 0.2rem; padding: 0.1rem 0.6rem; border-radius: 999px; background: #e0f2fe; color: #075985; font-size: 0.85rem; }
+				.error { color: #b91c1c; }
+			</style>
+		</head>
+		<body>
+			<header>
+				<span class="brand">{ nav.AppName }</span>
+				<nav>
+					<a href="/" class="active">Home</a>
+				</nav>
+				<div class="session">
+					<a href={ templ.URL(nav.LoginURL) }>Login</a>
+				</div>
+			</header>
+			<main>
+				@content
+			</main>
+			<footer>{ nav.AppName } — frontend partition · goyii advanced demo</footer>
+		</body>
+	</html>
+}
+
+templ homePage(d HomeData) {
+	<h1>Welcome to { d.AppName }</h1>
+	<p>
+		This application maps the Yii2 advanced template onto goyii: one process, one port —
+		this frontend answers at the root scope, the backend lands at /backend as a module,
+		and the console commands (migrate, serve) share this binary.
+	</p>
+	<p>
+		<span class="status">env: { d.Env }</span>
+		if d.Debug {
+			<span class="status">debug on</span>
+		}
+	</p>
+	<p>
+		<a href={ templ.URL(d.LoginURL) }>Sign in</a> — login joins in a later slice.
+	</p>
+}
+
+// errorPageData is the unified error payload reshaped for the template; the
+// status text is precomputed so the template interpolates strings only.
+type errorPageData struct {
+	Heading string
+	Message string
+}
+
+templ errorPage(d errorPageData) {
+	<h1>{ d.Heading }</h1>
+	<p class="error">{ d.Message }</p>
+	<p><a href="/">Home</a></p>
+}

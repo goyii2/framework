@@ -1,0 +1,12 @@
+# The dev overlay: loaded on top of app.yaml whenever GOYII_ENV selects dev
+# (the default), replacing only the fields it names — everything else keeps
+# its app.yaml value. Any other environment (GOYII_ENV=prod ...) reads
+# app.yaml alone until a matching web-<env>.yaml sits next to it (the prod
+# overlay joins in a later slice).
+#
+# The overlay flips the debug flag on — the environment difference the front
+# page also shows: dev error pages reveal their cause while other
+# environments keep the base file's terse setting. APP_DEBUG=true overrides
+# both, like every leaf field.
+app:
+  debug: true

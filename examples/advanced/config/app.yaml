@@ -1,0 +1,30 @@
+# goyii advanced example — configuration values only; behavior is assembled
+# in main.go (code owns behavior, yaml owns values).
+#
+# Every value below can be overridden through the matching environment
+# variable (field path upper-cased): DB_DSN, WEB_LISTEN, APP_DEBUG, ...
+#
+# The active environment (GOYII_ENV, default dev) overlays this file with
+# web-<env>.yaml when that file exists — see web-dev.yaml. This base file
+# carries the terse production-flavored values; the environments/ directory
+# of the Yii2 advanced template maps onto those overlays.
+app:
+  name: advanced
+  debug: false
+
+web:
+  listen: "127.0.0.1:8090"
+
+db:
+  driver: sqlite
+  # WAL plus a busy timeout let the serve process and a second migrate
+  # invocation share the same sqlite file without "database is locked"
+  # failures.
+  dsn: runtime/advanced.sqlite?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)
+
+log:
+  level: info
+  gorm:
+    # Queries at or above this duration log as slow; high enough that the
+    # console stays quiet in ordinary runs.
+    slowThresholdMs: 200

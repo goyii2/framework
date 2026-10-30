@@ -15,6 +15,7 @@ Thumbs.db
 
 # Example runtime state (sqlite db, logs, sessions, cache)
 examples/basic/runtime/
+examples/advanced/runtime/
 
 # Frontend build-time state of the example (the committed dist/ outputs stay)
 examples/basic/web/node_modules/
