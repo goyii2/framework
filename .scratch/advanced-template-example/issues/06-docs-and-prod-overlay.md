@@ -1,6 +1,6 @@
 # 06: 文档、prod overlay 与收尾验证
 
-Status: ready-for-agent
+Status: claimed
 Blocked by: 04（Post 全链路）、05（/backend/system 用户管理）
 
 **What to build:** 收尾：新增 `docs/示例-advanced模板.md` 讲清映射关系（frontend↔根作用域、backend↔Module、console↔命令、common↔共享包、environments↔overlay）及与 Yii2 高级模板的差异（独立登录 → 单一登录 + RBAC 的理由）；README 快速上手补 advanced 一节；web-prod.yaml 以 `${VAR}` 插值演示生产配置；全量检查收口。
