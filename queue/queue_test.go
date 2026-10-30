@@ -197,7 +197,7 @@ func newTestQueue(t *testing.T) (*Queue, *fakeDriver, *eventLog) {
 	}
 	log := &eventLog{}
 	drv := &fakeDriver{}
-	q := New(drv, reg, WithDispatcher(log.dispatch), WithPollInterval(time.Millisecond))
+	q := NewWithDriver(drv, reg, WithDispatcher(log.dispatch), WithPollInterval(time.Millisecond))
 	return q, drv, log
 }
 
@@ -739,7 +739,7 @@ func TestRetryFailedDelegates(t *testing.T) {
 // error from every operation, the shape used for misconfiguration.
 func TestFailingDriverSurfacesErrors(t *testing.T) {
 	boom := errors.New("boom")
-	q := New(Failing(boom), new(Registry))
+	q := NewWithDriver(Failing(boom), new(Registry))
 
 	if _, err := q.Push(context.Background(), &countedJob{}); err == nil || !errors.Is(err, boom) {
 		t.Errorf("Push through failing driver: err=%v, want boom", err)
@@ -758,7 +758,7 @@ func TestFailingDriverSurfacesErrors(t *testing.T) {
 // TestQueueWithoutRegistry verifies New with a nil registry still works (an
 // empty registry the application fills later).
 func TestQueueWithoutRegistry(t *testing.T) {
-	q := New(&fakeDriver{}, nil)
+	q := NewWithDriver(&fakeDriver{}, nil)
 	if q.Jobs() == nil {
 		t.Fatal("Jobs() returned nil for a nil-construction registry")
 	}

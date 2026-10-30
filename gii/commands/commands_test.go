@@ -18,7 +18,7 @@ import (
 func testApp(t *testing.T, ddl ...string) *base.Application {
 	t.Helper()
 	dsn := filepath.Join(t.TempDir(), "console.db")
-	conn, err := db.Connect(config.DB{Driver: "sqlite", DSN: dsn})
+	conn, err := db.New(db.Config{Driver: "sqlite", DSN: dsn})
 	if err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}
@@ -67,7 +67,7 @@ func TestModelCommandOverridesDSN(t *testing.T) {
 	// file holding a different one — the flag decides which is read.
 	app := testApp(t, `CREATE TABLE tag (id INTEGER PRIMARY KEY AUTOINCREMENT, label VARCHAR(30) NOT NULL)`)
 	other := filepath.Join(t.TempDir(), "other.db")
-	conn, err := db.Connect(config.DB{Driver: "sqlite", DSN: other})
+	conn, err := db.New(db.Config{Driver: "sqlite", DSN: other})
 	if err != nil {
 		t.Fatal(err)
 	}

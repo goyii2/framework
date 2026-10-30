@@ -141,7 +141,7 @@ var modelDDL = []string{
 // exists per connection.
 func newTestContext(t *testing.T) context.Context {
 	t.Helper()
-	conn, err := db.Connect(config.DB{Driver: "sqlite", DSN: ":memory:"})
+	conn, err := db.New(db.Config{Driver: "sqlite", DSN: ":memory:"})
 	if err != nil {
 		t.Fatalf("connect in-memory sqlite: %v", err)
 	}

@@ -3,29 +3,28 @@ package db
 import (
 	"sync"
 	"sync/atomic"
-
-	"github.com/goyii2/framework/config"
 )
 
-// Component is the application's lazily initialized database connection
-// holder. The first Get opens the connection from the stored configuration
-// (with any stored Connect options applied); Set replaces the connection at
-// any time (nil resets the holder so the next Get opens from the
-// configuration again), which is how tests inject fakes or pre-opened
-// connections. Unlike a value component, opening can fail, so Get returns
-// the error; a failed open is not cached — the next Get retries, so a
-// database that becomes reachable later still connects. Safe for concurrent
-// use.
+// Component is the lazily initialized database connection holder, for
+// applications that want lazy or retryable open semantics instead of eager
+// assembly (New at the application entry). The first Get opens the
+// connection from the stored configuration (with any stored options
+// applied); Set replaces the connection at any time (nil resets the holder
+// so the next Get opens from the configuration again), which is how tests
+// inject fakes or pre-opened connections. Unlike a value component, opening
+// can fail, so Get returns the error; a failed open is not cached — the next
+// Get retries, so a database that becomes reachable later still connects.
+// Safe for concurrent use.
 type Component struct {
 	mu   sync.Mutex // serializes the first open
-	cfg  config.DB
+	cfg  Config
 	opts []Option
 	val  atomic.Pointer[Conn]
 }
 
 // NewComponent creates a holder that opens connections for cfg on first
 // use, applying the given options on every open.
-func NewComponent(cfg config.DB, opts ...Option) *Component {
+func NewComponent(cfg Config, opts ...Option) *Component {
 	return &Component{cfg: cfg, opts: opts}
 }
 
@@ -39,7 +38,7 @@ func (c *Component) Get() (*Conn, error) {
 	if conn := c.val.Load(); conn != nil {
 		return conn, nil
 	}
-	conn, err := Connect(c.cfg, c.opts...)
+	conn, err := New(c.cfg, c.opts...)
 	if err != nil {
 		return nil, err
 	}

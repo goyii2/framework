@@ -59,7 +59,7 @@ func New(cfg config.Config) *Application {
 	a := &Application{
 		cfg:       cfg,
 		log:       logComp,
-		db:        db.NewComponent(cfg.DB, dbOpts...),
+		db:        db.NewComponent(db.Config{Driver: cfg.DB.Driver, DSN: cfg.DB.DSN}, dbOpts...),
 		redisComp: redisComp,
 		cacheComp: newComponent(func() cache.Cache { return newDefaultCache(cfg.Cache, redisComp) }),
 		mutexComp: newComponent(func() mutex.Mutex { return newDefaultMutex(cfg.Mutex, redisComp) }),

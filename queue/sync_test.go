@@ -17,7 +17,7 @@ func newSyncQueue(t *testing.T) (*Queue, *eventLog) {
 		t.Fatalf("NewRegistry: %v", err)
 	}
 	log := &eventLog{}
-	q := New(NewSync(), reg, WithDispatcher(log.dispatch))
+	q := NewWithDriver(NewSync(), reg, WithDispatcher(log.dispatch))
 	return q, log
 }
 

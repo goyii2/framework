@@ -11,7 +11,6 @@ import (
 	// through — the same one the migrate commands use.
 	_ "github.com/glebarez/go-sqlite"
 
-	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/db"
 	"github.com/goyii2/framework/examples/basic/migrations"
 	"github.com/goyii2/framework/migrate"
@@ -41,7 +40,7 @@ func exampleDatabase(t *testing.T) (*db.Conn, func()) {
 		t.Fatalf("applying the example migrations: %v", err)
 	}
 
-	gormConn, err := db.Connect(config.DB{Driver: "sqlite", DSN: dsn})
+	gormConn, err := db.New(db.Config{Driver: "sqlite", DSN: dsn})
 	if err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}

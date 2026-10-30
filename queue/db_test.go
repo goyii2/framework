@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/db"
 	"github.com/goyii2/framework/migrate"
 )
@@ -19,7 +18,7 @@ import (
 func newTestDB(t *testing.T, table string) *DBDriver {
 	t.Helper()
 	dsn := filepath.Join(t.TempDir(), "queue.db")
-	conn, err := db.Connect(config.DB{Driver: "sqlite", DSN: dsn})
+	conn, err := db.New(db.Config{Driver: "sqlite", DSN: dsn})
 	if err != nil {
 		t.Fatalf("connect sqlite: %v", err)
 	}
@@ -66,7 +65,7 @@ func newDBQueue(t *testing.T) (*Queue, *DBDriver) {
 		t.Fatalf("NewRegistry: %v", err)
 	}
 	d := newTestDB(t, "")
-	return New(d, reg), d
+	return NewWithDriver(d, reg), d
 }
 
 // mustPush pushes job through q, failing the test on error.
@@ -222,7 +221,7 @@ func TestDBPriorityOrdersReserve(t *testing.T) {
 // (the two-process view) hand every message to exactly one of them.
 func TestDBReserveIsExclusiveAcrossWorkers(t *testing.T) {
 	dsn := filepath.Join(t.TempDir(), "queue.db")
-	conn, err := db.Connect(config.DB{Driver: "sqlite", DSN: dsn})
+	conn, err := db.New(db.Config{Driver: "sqlite", DSN: dsn})
 	if err != nil {
 		t.Fatalf("connect sqlite: %v", err)
 	}
@@ -430,7 +429,7 @@ func TestDBRunThroughQueueDeliversPayload(t *testing.T) {
 // names on one database keep independent queues.
 func TestDBCustomTableNameIsolation(t *testing.T) {
 	dsn := filepath.Join(t.TempDir(), "queue.db")
-	conn, err := db.Connect(config.DB{Driver: "sqlite", DSN: dsn})
+	conn, err := db.New(db.Config{Driver: "sqlite", DSN: dsn})
 	if err != nil {
 		t.Fatalf("connect sqlite: %v", err)
 	}

@@ -79,7 +79,7 @@ func TestApplicationDBComponent(t *testing.T) {
 		t.Error("repeated DB() returned a different connection")
 	}
 
-	replacement, err := db.Connect(config.DB{Driver: "sqlite", DSN: dsn})
+	replacement, err := db.New(db.Config{Driver: "sqlite", DSN: dsn})
 	if err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}

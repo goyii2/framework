@@ -5,8 +5,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-
-	"github.com/goyii2/framework/config"
 )
 
 // sqliteDSN returns a file-backed sqlite DSN; file-backed rather than
@@ -19,9 +17,9 @@ func sqliteDSN(t *testing.T) string {
 // tableNames returns the tables visible through a fresh connection to dsn.
 func tableNames(t *testing.T, dsn string) []string {
 	t.Helper()
-	conn, err := Connect(config.DB{Driver: "sqlite", DSN: dsn})
+	conn, err := New(Config{Driver: "sqlite", DSN: dsn})
 	if err != nil {
-		t.Fatalf("Connect() error = %v", err)
+		t.Fatalf("New() error = %v", err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 	var names []string
@@ -40,10 +38,10 @@ func contains(list []string, want string) bool {
 	return false
 }
 
-func TestConnectOpensSQLiteAndRunsQueries(t *testing.T) {
-	conn, err := Connect(config.DB{Driver: "sqlite", DSN: sqliteDSN(t)})
+func TestNewOpensSQLiteAndRunsQueries(t *testing.T) {
+	conn, err := New(Config{Driver: "sqlite", DSN: sqliteDSN(t)})
 	if err != nil {
-		t.Fatalf("Connect() error = %v", err)
+		t.Fatalf("New() error = %v", err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 
@@ -77,23 +75,23 @@ func TestCanonicalDriverDefaultsToMySQL(t *testing.T) {
 	}
 }
 
-func TestConnectAcceptsDriverAliases(t *testing.T) {
+func TestNewAcceptsDriverAliases(t *testing.T) {
 	for _, name := range []string{"sqlite", "sqlite3", " SQLite3 "} {
-		conn, err := Connect(config.DB{Driver: name, DSN: sqliteDSN(t)})
+		conn, err := New(Config{Driver: name, DSN: sqliteDSN(t)})
 		if err != nil {
-			t.Fatalf("Connect(driver=%q) error = %v", name, err)
+			t.Fatalf("New(driver=%q) error = %v", name, err)
 		}
 		t.Cleanup(func() { _ = conn.Close() })
 		if got := conn.Driver(); got != "sqlite" {
-			t.Errorf("Connect(driver=%q).Driver() = %q, want sqlite", name, got)
+			t.Errorf("New(driver=%q).Driver() = %q, want sqlite", name, got)
 		}
 	}
 }
 
-func TestConnectRejectsUnknownDriver(t *testing.T) {
-	_, err := Connect(config.DB{Driver: "oracle", DSN: "host=localhost"})
+func TestNewRejectsUnknownDriver(t *testing.T) {
+	_, err := New(Config{Driver: "oracle", DSN: "host=localhost"})
 	if err == nil {
-		t.Fatal("Connect(oracle) returned nil error")
+		t.Fatal("New(oracle) returned nil error")
 	}
 	for _, want := range []string{"unsupported driver", "mysql", "postgres", "sqlserver", "sqlite"} {
 		if !strings.Contains(err.Error(), want) {
@@ -102,21 +100,21 @@ func TestConnectRejectsUnknownDriver(t *testing.T) {
 	}
 }
 
-func TestConnectRequiresDSN(t *testing.T) {
-	_, err := Connect(config.DB{Driver: "sqlite"})
+func TestNewRequiresDSN(t *testing.T) {
+	_, err := New(Config{Driver: "sqlite"})
 	if err == nil {
-		t.Fatal("Connect without DSN returned nil error")
+		t.Fatal("New without DSN returned nil error")
 	}
 	if !strings.Contains(err.Error(), DSNEnvVar) {
 		t.Errorf("error %q must name the %s fallback", err, DSNEnvVar)
 	}
 }
 
-func TestConnectDSNEnvOverridesConfiguredDSN(t *testing.T) {
+func TestNewDSNEnvOverridesConfiguredDSN(t *testing.T) {
 	configured := sqliteDSN(t)
 	fromEnv := sqliteDSN(t)
 
-	conn, err := Connect(config.DB{Driver: "sqlite", DSN: configured})
+	conn, err := New(Config{Driver: "sqlite", DSN: configured})
 	if err != nil {
 		t.Fatalf("seeding configured database: %v", err)
 	}
@@ -126,9 +124,9 @@ func TestConnectDSNEnvOverridesConfiguredDSN(t *testing.T) {
 	_ = conn.Close()
 
 	t.Setenv(DSNEnvVar, fromEnv)
-	conn, err = Connect(config.DB{Driver: "sqlite", DSN: configured})
+	conn, err = New(Config{Driver: "sqlite", DSN: configured})
 	if err != nil {
-		t.Fatalf("Connect() error = %v", err)
+		t.Fatalf("New() error = %v", err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 
@@ -139,7 +137,7 @@ func TestConnectDSNEnvOverridesConfiguredDSN(t *testing.T) {
 
 func TestComponentOpensLazilyAndCaches(t *testing.T) {
 	dsn := sqliteDSN(t)
-	component := NewComponent(config.DB{Driver: "sqlite", DSN: dsn})
+	component := NewComponent(Config{Driver: "sqlite", DSN: dsn})
 
 	first, err := component.Get()
 	if err != nil {
@@ -165,16 +163,16 @@ func TestComponentOpensLazilyAndCaches(t *testing.T) {
 }
 
 func TestComponentRetriesAfterFailedOpen(t *testing.T) {
-	component := NewComponent(config.DB{Driver: "sqlite"}) // no DSN
+	component := NewComponent(Config{Driver: "sqlite"}) // no DSN
 
 	if _, err := component.Get(); err == nil {
 		t.Fatal("Get() without DSN returned nil error")
 	}
 
 	dsn := sqliteDSN(t)
-	conn, err := Connect(config.DB{Driver: "sqlite", DSN: dsn})
+	conn, err := New(Config{Driver: "sqlite", DSN: dsn})
 	if err != nil {
-		t.Fatalf("Connect() error = %v", err)
+		t.Fatalf("New() error = %v", err)
 	}
 	component.Set(conn)
 
@@ -194,7 +192,7 @@ func TestComponentRetriesAfterFailedOpen(t *testing.T) {
 }
 
 func TestComponentConcurrentGetOpensOnce(t *testing.T) {
-	component := NewComponent(config.DB{Driver: "sqlite", DSN: sqliteDSN(t)})
+	component := NewComponent(Config{Driver: "sqlite", DSN: sqliteDSN(t)})
 
 	conns := make([]*Conn, 16)
 	var wg sync.WaitGroup

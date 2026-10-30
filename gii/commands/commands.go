@@ -146,7 +146,7 @@ func openConn(app *base.Application, cmd *cobra.Command) (*db.Conn, func(), erro
 	}
 	cfg := app.Config().DB
 	cfg.DSN = dsn
-	conn, err := db.Connect(cfg)
+	conn, err := db.New(db.Config{Driver: cfg.Driver, DSN: cfg.DSN})
 	if err != nil {
 		return nil, nil, err
 	}

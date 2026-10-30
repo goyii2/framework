@@ -12,7 +12,6 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/db"
 )
 
@@ -23,7 +22,7 @@ import (
 // integer with a default, a boolean, a datetime and the timestamp pair.
 func testConn(t *testing.T) *gorm.DB {
 	t.Helper()
-	conn, err := db.Connect(config.DB{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "gii.db")})
+	conn, err := db.New(db.Config{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "gii.db")})
 	if err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}
@@ -295,7 +294,7 @@ func TestGenerateCrudProducesModelControllerAndViews(t *testing.T) {
 }
 
 func TestGenerateCrudRequiresPrimaryKey(t *testing.T) {
-	conn, err := db.Connect(config.DB{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "noidx.db")})
+	conn, err := db.New(db.Config{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "noidx.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,7 +315,7 @@ func TestGenerateCrudRequiresPrimaryKey(t *testing.T) {
 // declarations resolvable — the guarantee the generator can give without
 // the surrounding project.
 func TestGeneratedCrudParsesAllDeclarations(t *testing.T) {
-	conn, err := db.Connect(config.DB{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "flat.db")})
+	conn, err := db.New(db.Config{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "flat.db")})
 	if err != nil {
 		t.Fatal(err)
 	}

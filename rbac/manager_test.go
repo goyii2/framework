@@ -10,7 +10,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/db"
 	"github.com/goyii2/framework/migrate"
 )
@@ -23,7 +22,7 @@ func newTestManager(t *testing.T, rules ...Rule) (*DbManager, *DbManager, *db.Co
 	t.Helper()
 	dsn := filepath.Join(t.TempDir(), "rbac.db")
 
-	conn, err := db.Connect(config.DB{Driver: "sqlite", DSN: dsn})
+	conn, err := db.New(db.Config{Driver: "sqlite", DSN: dsn})
 	if err != nil {
 		t.Fatalf("connect sqlite: %v", err)
 	}
@@ -644,7 +643,7 @@ func TestCacheInvalidationMakesMutationsImmediatelyVisible(t *testing.T) {
 // error (not a silent deny): running the manager before migrating must be
 // loud.
 func TestGraphLoadFailsBeforeTablesExist(t *testing.T) {
-	conn, err := db.Connect(config.DB{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "empty.db")})
+	conn, err := db.New(db.Config{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "empty.db")})
 	if err != nil {
 		t.Fatalf("connect sqlite: %v", err)
 	}

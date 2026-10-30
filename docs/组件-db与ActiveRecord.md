@@ -9,7 +9,7 @@
 conn, err := app.DB()
 
 // 直接建立（测试、工具）
-conn, err := db.Connect(config.DB{Driver: "sqlite", DSN: "runtime/app.sqlite"})
+conn, err := db.New(db.Config{Driver: "sqlite", DSN: "runtime/app.sqlite"})
 defer conn.Close()
 ```
 

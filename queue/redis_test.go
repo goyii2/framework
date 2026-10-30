@@ -29,7 +29,7 @@ func newRedisQueue(t *testing.T) (*Queue, *RedisDriver) {
 		t.Fatalf("NewRegistry: %v", err)
 	}
 	d, _ := newTestRedis(t)
-	return New(d, reg), d
+	return NewWithDriver(d, reg), d
 }
 
 // dueCount reports how many waiting messages are due right now, across all

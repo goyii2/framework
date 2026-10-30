@@ -66,7 +66,7 @@ func (r *sqlRecorder) reset() {
 func newActiveTestContext(t *testing.T) (context.Context, *sqlRecorder) {
 	t.Helper()
 	rec := &sqlRecorder{}
-	conn, err := db.Connect(config.DB{Driver: "sqlite", DSN: ":memory:"}, db.WithGormLogger(rec))
+	conn, err := db.New(db.Config{Driver: "sqlite", DSN: ":memory:"}, db.WithGormLogger(rec))
 	if err != nil {
 		t.Fatalf("connect in-memory sqlite: %v", err)
 	}

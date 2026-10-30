@@ -6,9 +6,10 @@ import (
 )
 
 // Failing wraps err into a driver whose every operation reports it — the
-// shape the application core uses when the configured driver cannot be built
-// (a database that will not open, an unknown driver name): the mistake
-// surfaces at first use instead of breaking application assembly.
+// shape a lazily assembled application uses when New rejected the queue
+// configuration (a dependency that will not open, an unknown driver name):
+// the mistake surfaces at first use instead of breaking application
+// assembly.
 func Failing(err error) Driver { return failingDriver{err} }
 
 // failingDriver reports one fixed error from every operation.

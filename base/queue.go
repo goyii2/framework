@@ -2,9 +2,6 @@ package base
 
 import (
 	"context"
-	"fmt"
-	"strings"
-	"time"
 
 	"github.com/redis/go-redis/v9"
 
@@ -27,35 +24,29 @@ func (a *Application) Queue() *queue.Queue { return a.queueComp.get() }
 func (a *Application) SetQueue(q *queue.Queue) { a.queueComp.set(q) }
 
 // newDefaultQueue builds the default queue component from the queue
-// configuration section. The sync driver (the default) touches nothing; the
-// db driver draws the application's database connection (its table comes
-// from queue.NewMigration, applied by the application's migrations); the
-// redis driver shares the application's redis connection unconditionally —
-// a queue coordinates processes, so a per-section override would hand out
-// messages nobody else sees. A driver the section cannot name — or a
-// database that will not open — yields a queue whose operations fail with
-// the configuration error at first use instead of breaking application
-// assembly.
+// configuration section. The section's values convert one-to-one into a
+// queue.Config and the driver selection — including which dependency that
+// driver resolves — belongs to the queue package: the database connection
+// and redis client are handed over lazily (WithDBFunc / WithRedisFunc), so
+// the sync driver touches neither. A construction the queue package rejects
+// (an unknown driver, a database that will not open) yields a queue whose
+// operations fail with that error at first use instead of breaking
+// application assembly.
 func newDefaultQueue(cfg config.Queue, dbComp *db.Component, shared *component[redis.UniversalClient], a *Application) *queue.Queue {
 	dispatch := queue.Dispatcher(func(ctx context.Context, event string, data any) {
 		a.Trigger(ctx, EventName(event), data)
 	})
-	poll := time.Duration(cfg.PollIntervalMs) * time.Millisecond
-	build := func(d queue.Driver) *queue.Queue {
-		return queue.New(d, nil, queue.WithDispatcher(dispatch), queue.WithPollInterval(poll))
+	q, err := queue.New(queue.Config{
+		Driver:         cfg.Driver,
+		TableName:      cfg.TableName,
+		PollIntervalMs: cfg.PollIntervalMs,
+	},
+		queue.WithDBFunc(dbComp.Get),
+		queue.WithRedisFunc(shared.get),
+		queue.WithDispatcher(dispatch),
+	)
+	if err != nil {
+		return queue.NewWithDriver(queue.Failing(err), nil, queue.WithDispatcher(dispatch))
 	}
-	switch strings.ToLower(strings.TrimSpace(cfg.Driver)) {
-	case "", "sync":
-		return build(queue.NewSync())
-	case "db":
-		conn, err := dbComp.Get()
-		if err != nil {
-			return build(queue.Failing(fmt.Errorf("queue: db driver needs the database connection: %w", err)))
-		}
-		return build(queue.NewDB(conn.DB, cfg.TableName))
-	case "redis":
-		return build(queue.NewRedis(shared.get(), ""))
-	default:
-		return build(queue.Failing(fmt.Errorf("queue: unknown driver %q (want sync, db or redis)", cfg.Driver)))
-	}
+	return q
 }

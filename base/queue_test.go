@@ -49,7 +49,7 @@ func TestApplicationQueueComponent(t *testing.T) {
 		t.Error("repeated Queue() returned a different instance")
 	}
 
-	fake := queue.New(queue.NewSync(), nil)
+	fake := queue.NewWithDriver(queue.NewSync(), nil)
 	app.SetQueue(fake)
 	if app.Queue() != fake {
 		t.Error("SetQueue must replace what Queue returns")

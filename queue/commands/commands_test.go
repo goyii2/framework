@@ -192,7 +192,7 @@ func TestRunUnknownJobFailsTheMessageNotTheCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)
 	}
-	other := queue.New(queue.NewDB(conn.DB, ""), ghostReg)
+	other := queue.NewWithDriver(queue.NewDB(conn.DB, ""), ghostReg)
 	if _, err := other.Push(ctx, &namedTestJob{name: "ghost"}); err != nil {
 		t.Fatalf("Push ghost: %v", err)
 	}

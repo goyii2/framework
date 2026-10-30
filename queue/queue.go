@@ -220,7 +220,7 @@ type Dispatcher func(ctx context.Context, event string, data any)
 
 // Queue is the application queue: a job registry over a driver. Push defers
 // work; Run and Listen execute it. The zero poll interval is not usable —
-// construct through New.
+// construct through New (Config-selected driver) or NewWithDriver.
 type Queue struct {
 	driver Driver
 	jobs   *Registry
@@ -228,35 +228,27 @@ type Queue struct {
 	poll   time.Duration
 }
 
-// QueueOption configures a Queue at construction.
-type QueueOption func(*Queue)
-
-// WithDispatcher routes the five lifecycle events through d.
-func WithDispatcher(d Dispatcher) QueueOption { return func(q *Queue) { q.events = d } }
-
-// WithPollInterval sets how long Listen waits between drain passes when the
-// queue is idle; d must be positive.
-func WithPollInterval(d time.Duration) QueueOption {
-	return func(q *Queue) {
-		if d > 0 {
-			q.poll = d
-		}
+// NewWithDriver builds the queue over an already-chosen driver — the escape
+// hatch behind New for custom drivers and tests. jobs may be nil (an empty
+// registry the application fills through Jobs before workers run); opts
+// carry the dispatcher and poll interval (WithPollInterval — there is no
+// Config to read them from).
+func NewWithDriver(d Driver, jobs *Registry, opts ...Option) *Queue {
+	var o options
+	applyOptions(opts, &o)
+	poll := time.Second
+	if o.poll > 0 {
+		poll = o.poll
 	}
+	return newOverDriver(d, jobs, o, poll)
 }
 
-// New creates the queue over driver. jobs may be nil (an empty registry the
-// application fills through Jobs before workers run).
-func New(d Driver, jobs *Registry, opts ...QueueOption) *Queue {
+// newOverDriver assembles the Queue around d.
+func newOverDriver(d Driver, jobs *Registry, o options, poll time.Duration) *Queue {
 	if jobs == nil {
 		jobs = new(Registry)
 	}
-	q := &Queue{driver: d, jobs: jobs, poll: time.Second}
-	for _, opt := range opts {
-		if opt != nil {
-			opt(q)
-		}
-	}
-	return q
+	return &Queue{driver: d, jobs: jobs, events: o.events, poll: poll}
 }
 
 // Jobs returns the job registry the worker resolves names through.
