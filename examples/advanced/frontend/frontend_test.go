@@ -70,7 +70,7 @@ func newFrontendHandler(t *testing.T) *web.Handler {
 	}
 
 	user := ar.New[models.User](app.WithContext(ctx)).New()
-	user.Username, user.Role = "demo", "user"
+	user.Username = "demo"
 	if err := user.SetPassword("demo123"); err != nil {
 		t.Fatalf("hashing the demo password: %v", err)
 	}

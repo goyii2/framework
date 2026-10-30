@@ -18,9 +18,11 @@ import (
 // after the Yii2 route it maps onto (console controllers there answer as
 // controller/action). It runs through the same application assembly as
 // serve, so the model's insert validation (username present, long enough
-// and unique) and bcrypt hashing apply on the console side too.
+// and unique) and bcrypt hashing apply on the console side too. Accounts
+// carry no roles here: granting a role is an RBAC assignment (see the seed
+// command), not an account attribute.
 func NewUserCreateCommand() *cobra.Command {
-	var username, password, role string
+	var username, password string
 	cmd := &cobra.Command{
 		Use:   "user/create",
 		Short: "Create a user account",
@@ -28,20 +30,19 @@ func NewUserCreateCommand() *cobra.Command {
 			ctx := cmd.Context() // carries the application (see console.ExecuteContext)
 
 			user := ar.New[models.User](ctx).New()
-			user.Username, user.Role = username, role
+			user.Username = username
 			if err := user.SetPassword(password); err != nil {
 				return err
 			}
 			if err := user.Save(); err != nil {
 				return fmt.Errorf("create user %s: %w", username, err)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "created user %s (id %d, role %s)\n", user.Username, user.ID, user.Role)
+			fmt.Fprintf(cmd.OutOrStdout(), "created user %s (id %d)\n", user.Username, user.ID)
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&username, "username", "", "login name of the account (required, unique)")
 	cmd.Flags().StringVar(&password, "password", "", "plaintext password, stored as a bcrypt hash (required)")
-	cmd.Flags().StringVar(&role, "role", "user", "role driving access control (the backend module requires admin)")
 	_ = cmd.MarkFlagRequired("username")
 	_ = cmd.MarkFlagRequired("password")
 	return cmd

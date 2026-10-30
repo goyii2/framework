@@ -61,11 +61,11 @@ func runUserCreate(t *testing.T, app *base.Application, args ...string) (string,
 func TestUserCreateCommandCreatesAccount(t *testing.T) {
 	app := newTestApp(t)
 
-	out, err := runUserCreate(t, app, "--username", "admin", "--password", "admin123", "--role", "admin")
+	out, err := runUserCreate(t, app, "--username", "admin", "--password", "admin123")
 	if err != nil {
 		t.Fatalf("user/create: %v", err)
 	}
-	if !strings.Contains(out, "created user admin") || !strings.Contains(out, "role admin") {
+	if !strings.Contains(out, "created user admin") {
 		t.Fatalf("output %q lacks the creation confirmation", out)
 	}
 
@@ -73,8 +73,8 @@ func TestUserCreateCommandCreatesAccount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loading the created account: %v", err)
 	}
-	if user.Role != "admin" {
-		t.Errorf("role = %q, want admin", user.Role)
+	if len(user.GetRoles()) != 0 {
+		t.Errorf("identity roles = %v, want none — roles are RBAC assignments, not account attributes", user.GetRoles())
 	}
 	if !user.CheckPassword("admin123") {
 		t.Error("the created account does not accept its password")

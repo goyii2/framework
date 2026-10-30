@@ -18,25 +18,28 @@ import (
 	"github.com/goyii2/framework/web"
 )
 
-// User is the shared account record: login name, bcrypt password hash and
-// the role driving access control (the backend module's admin guard reads
-// it). It implements the web.Identity contract, so an instance binds to the
-// session as the current user directly.
+// User is the shared account record: login name and bcrypt password hash —
+// nothing more. Authorization is not an account attribute: roles live in
+// the RBAC tables (auth_assignment), so the backend module's admin guard
+// asks the auth manager, never this row. It implements the web.Identity
+// contract, so an instance binds to the session as the current user
+// directly.
 type User struct {
 	ar.Model
 	ID           int64  `gorm:"column:id;primaryKey" json:"id"`
 	Username     string `gorm:"column:username" json:"username"`
 	PasswordHash string `gorm:"column:password_hash" json:"-"` // never leaves the model as JSON
-	Role         string `gorm:"column:role" json:"role"`
 }
 
 func (User) TableName() string { return "user" }
 
 // GetID, GetName and GetRoles fulfill web.Identity. The ID is the value the
-// session stores on login and FindIdentity resolves back.
+// session stores on login and FindIdentity resolves back. GetRoles answers
+// nil on purpose: the identity carries no roles of its own, every role
+// question goes through the auth manager's CheckAccess instead.
 func (u *User) GetID() string      { return strconv.FormatInt(u.ID, 10) }
 func (u *User) GetName() string    { return u.Username }
-func (u *User) GetRoles() []string { return []string{u.Role} }
+func (u *User) GetRoles() []string { return nil }
 
 // Rules validates accounts on insert: username present, 3+ characters and
 // unique in the user table. The uniqueness rule queries the database through
@@ -53,7 +56,6 @@ func (u *User) Rules() validators.RuleSet {
 					n, err := ar.New[User](u.Context()).Where("username = ?", *val).Count()
 					return err == nil && n == 0
 				}, z.Message("username is already taken")),
-			"role": z.String().Required(z.Message("role cannot be blank")),
 		}),
 	}
 }

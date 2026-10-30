@@ -1,0 +1,63 @@
+// The templ components of the backend partition: the dark frame the
+// module's Layout mounts and the dashboard page. Dark is the point — the
+// backend must be told apart from the frontend's light shell at a glance.
+// (The templ package needs no import here — the generator adds it for
+// every template that references it.)
+package views
+
+// shellData is the chrome of the backend frame. The frame carries no
+// request state of its own (the identity-dependent bits render inside the
+// pages), so the brand name is the only moving part, bound when the
+// partition assembles.
+type shellData struct {
+	AppName string
+}
+
+templ shell(nav shellData, title string, content templ.Component) {
+	<!DOCTYPE html>
+	<html lang="en">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>{ title }</title>
+			<style>
+				:root { font-family: system-ui, sans-serif; color: #e5e7eb; background: #111827; }
+				body { margin: 0; display: flex; min-height: 100vh; }
+				a { color: #93c5fd; }
+				aside { width: 14rem; flex-shrink: 0; background: #0b1220; color: #cbd5e1; padding: 1.2rem 1rem; box-sizing: border-box; }
+				.brand { display: block; font-weight: 700; color: #f8fafc; margin-bottom: 1.5rem; }
+				aside nav { display: flex; flex-direction: column; gap: 0.4rem; }
+				aside nav a { text-decoration: none; color: #cbd5e1; padding: 0.35rem 0.6rem; border-radius: 0.375rem; }
+				aside nav a.active { background: #1d4ed8; color: #ffffff; }
+				.side-note { margin-top: auto; font-size: 0.8rem; color: #64748b; padding-top: 1.5rem; }
+				main { flex: 1; padding: 1.5rem 2rem; }
+				main h1 { color: #f8fafc; }
+				footer { color: #64748b; padding-top: 1.5rem; font-size: 0.85rem; }
+			</style>
+		</head>
+		<body>
+			<aside>
+				<span class="brand">{ nav.AppName } · backend</span>
+				<nav>
+					<a href="/backend/" class="active">Dashboard</a>
+					<a href="/">View site</a>
+				</nav>
+				<p class="side-note">backend partition — module /backend, guarded by the admin role</p>
+			</aside>
+			<main>
+				@content
+				<footer>{ nav.AppName } — backend partition · goyii advanced demo</footer>
+			</main>
+		</body>
+	</html>
+}
+
+templ dashboardPage(d DashboardData) {
+	<h1>Dashboard</h1>
+	<p>Signed in as <strong>{ d.User }</strong> — the admin role let you past the module guard.</p>
+	<p>
+		This is the backend application of the advanced template: one /backend module behind a
+		module-wide access rule (unauthenticated visitors are pointed at the login page, accounts
+		without the admin role are refused), framed by this dark layout.
+	</p>
+}

@@ -1,22 +1,23 @@
 // The advanced example maps the Yii2 advanced template onto goyii: one
 // process, one port, partitions in packages. The frontend application is
 // the handler's root scope, the backend application lands at /backend as a
-// module, and the console application's commands (serve, migrate,
-// user/create — seed later) live in this same binary.
+// module guarded by the admin role, and the console application's commands
+// (serve, migrate, user/create, seed) live in this same binary.
 //
 // The layout follows the advanced template's partitions:
 //
 //	config/       this project's own configuration shape and yaml files
 //	common/       the shared package: models and migrations
 //	frontend/     the frontend application partition (root scope)
-//	backend/      the backend application partition (module /backend; a later slice)
-//	commands/     the user-defined console commands (user/create; more later)
+//	backend/      the backend application partition (module /backend)
+//	commands/     the user-defined console commands (user/create, seed)
 //
 // Each partition exposes its own assembly function; main only composes.
 //
 // Run it from this directory:
 //
 //	go run . migrate up
+//	go run . seed
 //	go run . user/create --username demo --password demo123
 //	go run . serve
 //
@@ -34,6 +35,7 @@ import (
 	// defines, from app.yaml + web-<env>.yaml + environment variables.
 	goyii "github.com/goyii2/framework/config"
 	"github.com/goyii2/framework/console"
+	"github.com/goyii2/framework/examples/advanced/backend"
 	"github.com/goyii2/framework/examples/advanced/commands"
 	"github.com/goyii2/framework/examples/advanced/common/migrations"
 	"github.com/goyii2/framework/examples/advanced/common/models"
@@ -41,6 +43,7 @@ import (
 	"github.com/goyii2/framework/examples/advanced/frontend"
 	"github.com/goyii2/framework/log"
 	migratecommands "github.com/goyii2/framework/migrate/commands"
+	"github.com/goyii2/framework/rbac"
 	"github.com/goyii2/framework/session"
 	"github.com/goyii2/framework/web"
 )
@@ -89,19 +92,32 @@ func main() {
 	// the account row — the bridge that turns a session cookie into the
 	// logged-in state the frontend navigation shows.
 	handler.SessionManager().IdentityFinder = models.FindIdentity(app)
+	// The RBAC manager answers the access rules and User.Can against the
+	// auth tables the common migrations create; the seed command grants the
+	// admin role the backend module's guard requires. Accounts carry no
+	// role attributes — assignments in the auth tables are the only source.
+	auth, err := rbac.NewDbManager(app.DB().DB)
+	if err != nil {
+		fail(err)
+	}
+	handler.SetAuthManager(auth)
 	// The frontend partition registers itself: its light layout, its views
 	// and its root-scope routes all live behind its own assembly function.
+	// It goes first — the backend partition's guard resolves the login
+	// page through the frontend's named route.
 	if err := frontend.Register(handler, app); err != nil {
 		fail(err)
 	}
-	// The backend partition mounts its /backend module here once its slice
-	// lands: backend.Register(handler, app).
+	// The backend partition mounts its /backend module: dark layout, admin
+	// guard and dashboard, all behind its own assembly function.
+	if err := backend.Register(handler, app, auth); err != nil {
+		fail(err)
+	}
 
 	con := console.New(app, console.WithHandler(handler), console.WithListen(cfg.Web.Listen))
 	con.AddCommand(migratecommands.New(app, migrations.All()))
 	con.AddCommand(commands.NewUserCreateCommand())
-	// The commands partition adds its seed command here once that slice
-	// lands.
+	con.AddCommand(commands.NewSeedCommand())
 	if err := con.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
