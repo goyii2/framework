@@ -88,6 +88,33 @@
 // text, a non-object value, trailing garbage) — is reported under the
 // record-level "$root" key instead of a field.
 //
+// # Loading: binding and validation in one step
+//
+// Load closes the loop over a whole form model: it binds the request body
+// like Bind, then validates the model under the scenario given — but only
+// when the model's type implements validators.Ruled; a plain struct only
+// binds. Both stages report as one *validators.Errors, nil when every value
+// parsed and every rule declared for the scenario passed. Validation sees
+// the model as bound, so a field whose value failed to parse still faces
+// its rules: within one field the parse messages come first and the rule
+// messages after, an order tests can rely on. Record-level failures from
+// either stage — a malformed body, a struct-level rule — keep the "$root"
+// key, and the returned failure carries the scenario Load was asked for.
+// web.Context.LoadForm is the same call from an action, passing the
+// request's own context.
+//
+// # Refilling: exporting values
+//
+// Values exports a model back out as the map view.ActiveForm refills from:
+// one string per `form`-tagged field, keyed by the tag. Strings render as
+// themselves, integers and floats in their shortest exact form, booleans as
+// "true"/"false", []string comma-joined (a nil or empty list renders ""),
+// and a field whose type formats itself through encoding.TextMarshaler
+// renders that text — time.Time renders RFC 3339, fractional seconds
+// preserved so an edit form re-submits the stored instant. A field whose
+// type has no text form — an Unmarshaler without a Marshaler — is left out
+// rather than guessed, and untagged fields never appear.
+//
 // Wiring a form into an action:
 //
 //	type LoginForm struct {
@@ -95,11 +122,13 @@
 //	    Password string `form:"password"`
 //	}
 //
+//	func (f *LoginForm) Rules() validators.RuleSet { ... }
+//
 //	func (c *SiteController) ActionLogin(ctx *web.Context) error {
 //	    var f LoginForm
-//	    if errs := form.Bind(ctx.Request, &f); errs != nil {
-//	        return ctx.HTMLStatus(http.StatusUnprocessableEntity,
-//	            loginFormView(f, errs.Fields))
+//	    if errs := ctx.LoadForm(&f, validators.Scenario("login")); errs != nil {
+//	        return ctx.RenderComponentStatus(http.StatusUnprocessableEntity,
+//	            loginFormView(form.Values(&f), errs.Fields))
 //	    }
 //	    // ... authenticate ...
 //	}

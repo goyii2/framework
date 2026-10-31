@@ -8,7 +8,9 @@ import (
 	"strconv"
 
 	"github.com/goyii2/framework/base"
+	"github.com/goyii2/framework/form"
 	"github.com/goyii2/framework/session"
+	"github.com/goyii2/framework/validators"
 	"github.com/goyii2/framework/view"
 )
 
@@ -160,6 +162,15 @@ func (c *Context) ParamBool(name string) (bool, error) {
 		return false, fmt.Errorf("web: path parameter %q: %w", name, err)
 	}
 	return v, nil
+}
+
+// LoadForm binds the request body into the form model dst and validates it
+// under scenario in one step: a thin delegate of form.Load carrying this
+// request and its context. The returned *validators.Errors merges the
+// binding and rule messages of both stages; nil means every value parsed
+// and the model passed its rules.
+func (c *Context) LoadForm(dst any, scenario validators.Scenario) *validators.Errors {
+	return form.Load(c.Context(), c.r, dst, scenario)
 }
 
 // JSON writes v as the response body with an application/json content type.

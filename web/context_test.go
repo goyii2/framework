@@ -3,9 +3,15 @@ package web
 import (
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strings"
 	"testing"
 
+	z "github.com/Oudwins/zog"
+
+	"github.com/goyii2/framework/form"
 	"github.com/goyii2/framework/session"
+	"github.com/goyii2/framework/validators"
 )
 
 func TestContextErrRecordsAndReadsError(t *testing.T) {
@@ -78,5 +84,64 @@ func TestSessionAllReturnsIndependentCopy(t *testing.T) {
 	}
 	if s.Get("extra") != nil {
 		t.Errorf("mutating All() wrote into the session: %v", s.Get("extra"))
+	}
+}
+
+// loadFormModel carries both a parse-sensitive field and a rule, so a merged
+// LoadForm failure is observable end to end.
+type loadFormModel struct {
+	Name string `form:"name"`
+	Age  int    `form:"age"`
+}
+
+func (m *loadFormModel) Rules() validators.RuleSet {
+	return validators.RuleSet{
+		validators.Scenario("login"): z.Struct(z.Shape{
+			"name": z.String().Required(z.Message("name cannot be blank")),
+		}),
+	}
+}
+
+// loadFormRequest builds a form-encoded login post.
+func loadFormRequest(body string) *http.Request {
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	return req
+}
+
+func TestLoadFormBindsAndValidates(t *testing.T) {
+	c := newContext(nil, httptest.NewRecorder(), loadFormRequest("name=ada&age=42"))
+	f := loadFormModel{}
+	if errs := c.LoadForm(&f, validators.Scenario("login")); errs != nil {
+		t.Fatalf("LoadForm(valid) = %v, want nil", errs)
+	}
+	if f.Name != "ada" || f.Age != 42 {
+		t.Errorf("model = %+v, want the submitted values bound", f)
+	}
+}
+
+func TestLoadFormMatchesCallingFormLoadDirectly(t *testing.T) {
+	// The convenience method is a thin delegate: on the same request it
+	// returns exactly what form.Load on the request's own context returns —
+	// here a parse failure on age merged with the missing-name rule failure.
+	req := loadFormRequest("age=abc")
+	c := newContext(nil, httptest.NewRecorder(), req)
+	var viaContext, direct loadFormModel
+	viaErrs := c.LoadForm(&viaContext, validators.Scenario("login"))
+	directErrs := form.Load(c.Context(), c.Request(), &direct, validators.Scenario("login"))
+	if viaErrs == nil || directErrs == nil {
+		t.Fatalf("LoadForm = %v, form.Load = %v, want both to reject", viaErrs, directErrs)
+	}
+	if !reflect.DeepEqual(viaErrs, directErrs) {
+		t.Errorf("LoadForm = %v, form.Load = %v, want identical failures", viaErrs, directErrs)
+	}
+	if !reflect.DeepEqual(viaContext, direct) {
+		t.Errorf("models differ: LoadForm bound %+v, form.Load bound %+v", viaContext, direct)
+	}
+	if got := viaErrs.Fields["age"]; len(got) != 1 || got[0] != "not a valid integer" {
+		t.Errorf(`Fields["age"] = %q, want the parse message`, got)
+	}
+	if got := viaErrs.Fields["name"]; len(got) != 1 || got[0] != "name cannot be blank" {
+		t.Errorf(`Fields["name"] = %q, want the rule message`, got)
 	}
 }
