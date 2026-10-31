@@ -1,6 +1,6 @@
 # 01: url 绝对生成核心（SetHostInfo / AbsoluteURL / ToAbsolute）
 
-Status: ready-for-agent
+Status: claimed
 
 **What to build:** `url.Manager` 增加主机信息与其上的绝对网址生成能力。`SetHostInfo(s)` 接收一体字符串 `scheme://host[:port]`（如 `https://example.com`），写读走既有 RWMutex 模式（boot 期写、请求期读）；尾斜杠容错（设 `https://example.com/` 与不带斜杠产出一致）；缺 scheme 或缺 host 的值是装配错误，boot 期 fail-fast（与 `Add` 重复注册即 panic 同哲学）。`Manager.AbsoluteURL(name, params)` 生成完整网址：路由解析行为与 `URL` 完全一致（注册名走 pattern、未注册走约定回退），仅在结果前拼 HostInfo；HostInfo 未配置时返回明确 error（装配错误显性）。包级 `url.ToAbsolute(name, params) string` 是 `AbsoluteURL` 的吞错版：任何失败（含未配置 HostInfo、注册路由缺路径参数）返回 `"#"`，与 `To` 的 cannot-create 标记一致。`To` / `URL` 签名一律不动。属 URL 拼装而非编解码类高风险，**不走 TDD**：直接实现，用测试套件验证，收尾跑全量测试。
 
