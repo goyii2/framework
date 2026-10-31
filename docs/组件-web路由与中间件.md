@@ -141,6 +141,22 @@ url.To("post/index", url.P{"page": "2", "sort": "-id"})           // 冗余参�
 
 生成失败（命名路由缺路径参数）返回 `"#"`，与 Yii2 的 cannot-create 标记一致。
 
+### 绝对网址生成
+
+邮件渲染、队列任务、OAuth 回调等无请求上下文的消费者需要完整网址（`scheme://host[:port]` + 路径）。主机信息在 boot 期由装配代码注入，值来自项目配置——不从当前请求推导；需要跟随当前访问域名的场景用相对 URL（`url.To`）即可：
+
+```go
+url.SetDefault(handler.URLs())                 // 反向生成走这个路由表（既有装配）
+handler.URLs().SetHostInfo(cfg.Web.HostInfo)   // 一体字符串 scheme://host[:port]，如 https://example.com
+
+url.ToAbsolute("post/view", url.P{"id": "7"})  // -> https://example.com/post/7
+```
+
+- `SetHostInfo` 尾斜杠容错（`https://example.com/` 与不带斜杠产出一致）；缺 scheme、缺 host，或带 userinfo / 多余路径 / query / fragment 的值是装配错误，boot 期直接 panic。
+- `url.ToAbsolute` 路由解析规则与 `url.To` 完全一致（注册名走 pattern、未注册走约定回退），仅在前拼主机信息；任何失败（含未配置主机信息）返回 `"#"`。
+- 要显性错误的消费者走 `handler.URLs().AbsoluteURL(name, url.P{...})`：未配置主机信息或命名路由缺路径参数时返回 error，不产出半截网址。
+- 可跑示例见 `examples/basic` 与 `examples/advanced` 的文章页 Permalink 行（`Web.HostInfo` 配置，yaml key `hostInfo`）。
+
 ## 相关文档
 
 - [组件：session 与认证](组件-session与认证.md)
