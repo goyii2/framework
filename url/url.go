@@ -6,6 +6,7 @@
 package url
 
 import (
+	"errors"
 	"fmt"
 	neturl "net/url"
 	"strings"
@@ -23,8 +24,9 @@ type P map[string]string
 // handler fills it through Route.Name; lookups are O(1) map reads and safe
 // for concurrent use.
 type Manager struct {
-	mu    sync.RWMutex
-	named map[string]string // route name -> path pattern (no method prefix)
+	mu       sync.RWMutex
+	named    map[string]string // route name -> path pattern (no method prefix)
+	hostInfo string            // scheme://host[:port] prefix for absolute URLs; empty until SetHostInfo
 }
 
 // NewManager returns an empty manager.
@@ -43,6 +45,26 @@ func (m *Manager) Add(name, pattern string) {
 		m.named = make(map[string]string)
 	}
 	m.named[name] = pattern
+}
+
+// SetHostInfo sets the scheme-and-host prefix ("scheme://host[:port]") that
+// AbsoluteURL and ToAbsolute put in front of generated URLs. It is written
+// once at boot by wiring code and only read afterwards; a trailing slash is
+// tolerated and normalized away, so "https://example.com/" and
+// "https://example.com" yield the same URLs. A value without a scheme or
+// without a host (or carrying userinfo, a path, a query) is a boot-time
+// wiring mistake and panics, the same fail-fast philosophy as duplicate
+// Add: continuing would hand half-configured absolute URLs to consumers
+// with no request context to notice, such as mailers and OAuth callbacks.
+func (m *Manager) SetHostInfo(raw string) {
+	u, err := neturl.Parse(strings.TrimRight(raw, "/"))
+	if err != nil || u.User != nil || u.Scheme == "" || u.Host == "" ||
+		strings.TrimSuffix(u.Path, "/") != "" || u.RawQuery != "" || u.Fragment != "" {
+		panic(fmt.Sprintf("url: invalid host info %q: want scheme://host[:port] (boot-time wiring mistake)", raw))
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.hostInfo = u.Scheme + "://" + u.Host
 }
 
 // Has reports whether name is registered.
@@ -66,6 +88,26 @@ func (m *Manager) URL(name string, params P) (string, error) {
 		return convention(name, params), nil
 	}
 	return build(name, pattern, params)
+}
+
+// AbsoluteURL builds the absolute URL for name: exactly the generation
+// rules of URL (registered names render through their pattern, unregistered
+// names assemble by convention) with the configured host info in front.
+// Without host info it is an explicit error rather than a half URL —
+// absolute generation only makes sense once wiring has supplied the scheme
+// and host. Consumers that prefer a placeholder over an error use ToAbsolute.
+func (m *Manager) AbsoluteURL(name string, params P) (string, error) {
+	m.mu.RLock()
+	hostInfo := m.hostInfo
+	m.mu.RUnlock()
+	if hostInfo == "" {
+		return "", errors.New("url: host info not configured: set it with SetHostInfo before generating absolute URLs (boot-time wiring missing)")
+	}
+	rel, err := m.URL(name, params)
+	if err != nil {
+		return "", err
+	}
+	return hostInfo + rel, nil
 }
 
 // build fills the wildcards of a ServeMux path pattern with params and
@@ -176,6 +218,19 @@ func SetDefault(m *Manager) { defaultManager.Store(m) }
 // returns "#", Yii2's cannot-create marker, rather than a broken URL.
 func To(name string, params P) string {
 	u, err := Default().URL(name, params)
+	if err != nil {
+		return "#"
+	}
+	return u
+}
+
+// ToAbsolute builds the absolute URL for name through the default manager.
+// It is the error-swallowing counterpart of AbsoluteURL, as To is of URL:
+// any failure — host info not configured, a registered route lacking a
+// path parameter — returns "#", the cannot-create marker, instead of a
+// broken URL.
+func ToAbsolute(name string, params P) string {
+	u, err := Default().AbsoluteURL(name, params)
 	if err != nil {
 		return "#"
 	}
