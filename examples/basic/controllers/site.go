@@ -4,10 +4,7 @@
 package controllers
 
 import (
-	"context"
-	"encoding/json"
 	"net/http"
-	"strings"
 
 	z "github.com/Oudwins/zog"
 
@@ -15,8 +12,10 @@ import (
 	"github.com/goyii2/framework/examples/basic/models"
 	"github.com/goyii2/framework/examples/basic/notifier"
 	"github.com/goyii2/framework/examples/basic/views"
+	"github.com/goyii2/framework/form"
 	"github.com/goyii2/framework/i18n"
 	"github.com/goyii2/framework/url"
+	"github.com/goyii2/framework/validators"
 	"github.com/goyii2/framework/web"
 )
 
@@ -63,57 +62,65 @@ func (site *SiteController) ActionCsrf(c *web.Context) error {
 	return c.JSON(map[string]string{"csrf": c.CsrfToken()})
 }
 
-// loginPayload is the request body of ActionLogin, validated inline with a
-// zog schema before any database lookup happens.
-type loginPayload struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+// loginForm is the login form model: a standalone ruled struct — no record,
+// no table — that the action binds from the request and validates under the
+// login scenario in one LoadForm step. The `form` tags are the binding
+// whitelist; the schema keeps the required-field semantics and the message
+// ids the translation files already carry.
+type loginForm struct {
+	Username string `form:"username"`
+	Password string `form:"password"`
 }
 
-var loginSchema = z.Struct(z.Shape{
-	"username": z.String().Required(z.Message("username cannot be blank")),
-	"password": z.String().Required(z.Message("password cannot be blank")),
-})
+// scenarioLogin is the custom scenario the login form validates under.
+const scenarioLogin validators.Scenario = "login"
+
+// Rules requires both fields of a login submission, so blank ones answer
+// with their own notes instead of a credentials error.
+func (f *loginForm) Rules() validators.RuleSet {
+	return validators.RuleSet{
+		scenarioLogin: z.Struct(z.Shape{
+			"username": z.String().Required(z.Message("username cannot be blank")),
+			"password": z.String().Required(z.Message("password cannot be blank")),
+		}),
+	}
+}
 
 // ActionLogin authenticates against the user table and binds the account to
 // the session. Unknown users and wrong passwords answer the same 401 — the
 // response must not reveal which half was wrong. The action serves both
 // shapes of caller: JSON API clients get validated JSON replies, the
 // browser login form is re-rendered with its errors under the failing
-// status and redirected to the post list on success.
+// status and redirected to the post list on success. Binding and validation
+// are one LoadForm step over the form model: a malformed body and a rule
+// failure alike come back as the flat per-field error map, translated
+// through the validators' message path.
 func (site *SiteController) ActionLogin(c *web.Context) error {
-	var payload loginPayload
-	if strings.HasPrefix(c.Request().Header.Get("Content-Type"), "application/json") {
-		if err := json.NewDecoder(c.Request().Body).Decode(&payload); err != nil {
-			return web.BadRequest("malformed JSON body")
-		}
-	} else {
-		payload.Username = c.Request().PostFormValue("username")
-		payload.Password = c.Request().PostFormValue("password")
-	}
-
+	var f loginForm
 	html := c.ResponseFormat() == "html"
-	if issues := loginSchema.Validate(&payload); len(issues) > 0 {
-		fields := translateIssues(c.Context(), z.Issues.Flatten(issues))
+	if errs := c.LoadForm(&f, scenarioLogin); errs != nil {
 		if html {
 			c.SetTitle(i18n.T(c.Context(), "app", "Login", nil))
 			return c.RenderStatus(http.StatusUnprocessableEntity, "site/login", views.LoginData{
-				Action:   url.To("site/login", nil),
-				CSRF:     c.CsrfToken(),
-				Username: payload.Username,
-				Errors:   fields,
+				Action: url.To("site/login", nil),
+				CSRF:   c.CsrfToken(),
+				// The refilled username is what the model holds after the
+				// rejected submission, exported the way every form model
+				// refills its view.
+				Username: form.Values(&f)["username"],
+				Errors:   errs.Fields,
 			})
 		}
-		return c.JSONStatus(http.StatusUnprocessableEntity, z.Issues.Flatten(issues))
+		return c.JSONStatus(http.StatusUnprocessableEntity, errs.Fields)
 	}
-	user, err := ar.New[models.User](c.Context()).Where("username = ?", payload.Username).One()
-	if err != nil || !user.CheckPassword(payload.Password) {
+	user, err := ar.New[models.User](c.Context()).Where("username = ?", f.Username).One()
+	if err != nil || !user.CheckPassword(f.Password) {
 		if html {
 			c.SetTitle(i18n.T(c.Context(), "app", "Login", nil))
 			return c.RenderStatus(http.StatusUnauthorized, "site/login", views.LoginData{
 				Action:   url.To("site/login", nil),
 				CSRF:     c.CsrfToken(),
-				Username: payload.Username,
+				Username: form.Values(&f)["username"],
 				Error:    i18n.T(c.Context(), "app", "Wrong username or password.", nil),
 			})
 		}
@@ -158,21 +165,6 @@ func (site *SiteController) ActionMe(c *web.Context) error {
 		"name":  identity.GetName(),
 		"roles": identity.GetRoles(),
 	})
-}
-
-// translateIssues maps a field -> messages set through the message source,
-// so messages an inline zog schema produced localize the same way model
-// rules do (the automatic translation sits in the model save pipeline).
-func translateIssues(ctx context.Context, fields map[string][]string) map[string][]string {
-	out := make(map[string][]string, len(fields))
-	for field, msgs := range fields {
-		translated := make([]string, len(msgs))
-		for i, msg := range msgs {
-			translated[i] = i18n.T(ctx, "app", msg, nil)
-		}
-		out[field] = translated
-	}
-	return out
 }
 
 // ActionHome is the browser front page: an introduction, the entry links

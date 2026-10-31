@@ -233,4 +233,21 @@ func TestLoginBlankFieldsAnswerPerFieldErrors(t *testing.T) {
 	if !strings.Contains(body, "username cannot be blank") || !strings.Contains(body, "password cannot be blank") {
 		t.Fatal("blank fields render no per-field errors")
 	}
+
+	// A half-filled submission re-renders with the filled half refilled and
+	// only the blank half's note.
+	body, status, _ = postForm(t, client, srv.URL+"/login", url.Values{
+		"_csrf":    {match[1]},
+		"username": {"demo"},
+		"password": {""},
+	})
+	if status != http.StatusUnprocessableEntity {
+		t.Fatalf("half-filled submission status = %d, want 422", status)
+	}
+	if !strings.Contains(body, "password cannot be blank") || strings.Contains(body, "username cannot be blank") {
+		t.Fatal("half-filled submission renders the wrong field notes")
+	}
+	if !strings.Contains(body, `value="demo"`) {
+		t.Fatal("the submitted username is not refilled on the rejected form")
+	}
 }

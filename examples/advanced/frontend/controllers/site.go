@@ -11,6 +11,8 @@ import (
 	"github.com/goyii2/framework/db/ar"
 	"github.com/goyii2/framework/examples/advanced/common/models"
 	"github.com/goyii2/framework/examples/advanced/frontend/views"
+	"github.com/goyii2/framework/form"
+	"github.com/goyii2/framework/validators"
 	"github.com/goyii2/framework/web"
 )
 
@@ -39,18 +41,27 @@ func (site *SiteController) ActionIndex(c *web.Context) error {
 	return c.Render("site/index", data)
 }
 
-// loginPayload is the submitted form of ActionLogin.
-type loginPayload struct {
-	Username string
-	Password string
+// loginForm is the login form model: a standalone ruled struct — no record,
+// no table — that the action binds from the request and validates under the
+// login scenario in one LoadForm step. The `form` tags are the binding
+// whitelist; the schema keeps the required-field semantics, so blank fields
+// answer with their own notes instead of a credentials error.
+type loginForm struct {
+	Username string `form:"username"`
+	Password string `form:"password"`
 }
 
-// loginSchema checks the submission before any database lookup happens, so
-// blank fields answer with their own notes instead of a credentials error.
-var loginSchema = z.Struct(z.Shape{
-	"username": z.String().Required(z.Message("username cannot be blank")),
-	"password": z.String().Required(z.Message("password cannot be blank")),
-})
+// scenarioLogin is the custom scenario the login form validates under.
+const scenarioLogin validators.Scenario = "login"
+
+func (f *loginForm) Rules() validators.RuleSet {
+	return validators.RuleSet{
+		scenarioLogin: z.Struct(z.Shape{
+			"username": z.String().Required(z.Message("username cannot be blank")),
+			"password": z.String().Required(z.Message("password cannot be blank")),
+		}),
+	}
+}
 
 // ActionLoginForm renders the login page. The form posts back to /login,
 // carrying the CSRF token in the hidden field the middleware verifies.
@@ -63,25 +74,24 @@ func (site *SiteController) ActionLoginForm(c *web.Context) error {
 }
 
 // ActionLogin authenticates the form submission against the user table and
-// binds the account to the session. Unknown users and wrong passwords answer
-// the same 401 — the reply must not reveal which half was wrong — with the
-// form re-rendered and the submitted username refilled; no login state is
-// stored, so the failure leaves the requester a guest.
+// binds the account to the session. Binding and validation are one LoadForm
+// step over the form model; unknown users and wrong passwords answer the
+// same 401 — the reply must not reveal which half was wrong — with the form
+// re-rendered and the submitted username refilled from what the model
+// holds; no login state is stored, so the failure leaves the requester a
+// guest.
 func (site *SiteController) ActionLogin(c *web.Context) error {
-	payload := loginPayload{
-		Username: c.Request().PostFormValue("username"),
-		Password: c.Request().PostFormValue("password"),
-	}
-	if issues := loginSchema.Validate(&payload); len(issues) > 0 {
+	var f loginForm
+	if errs := c.LoadForm(&f, scenarioLogin); errs != nil {
 		return site.loginForm(c, http.StatusUnprocessableEntity, views.LoginData{
-			Username: payload.Username,
-			Errors:   z.Issues.Flatten(issues),
+			Username: form.Values(&f)["username"],
+			Errors:   errs.Fields,
 		})
 	}
-	user, err := ar.New[models.User](c.Context()).Where("username = ?", payload.Username).One()
-	if err != nil || !user.CheckPassword(payload.Password) {
+	user, err := ar.New[models.User](c.Context()).Where("username = ?", f.Username).One()
+	if err != nil || !user.CheckPassword(f.Password) {
 		return site.loginForm(c, http.StatusUnauthorized, views.LoginData{
-			Username: payload.Username,
+			Username: form.Values(&f)["username"],
 			Error:    "Wrong username or password.",
 		})
 	}
