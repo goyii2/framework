@@ -73,7 +73,7 @@ func (pc *PostController) ActionView(c *web.Context) error {
 		Body:         post.Body,
 		Author:       post.AuthorName(),
 		Created:      post.CreatedAt.Format("2006-01-02 15:04"),
-		PermalinkURL: url.ToAbsolute("post/view", url.P{"id": strconv.FormatInt(post.ID, 10)}),
+		PermalinkURL: url.Build("post/view", url.P{"id": strconv.FormatInt(post.ID, 10)}).Absolute(),
 		BackURL:      url.To("post/index", nil),
 	})
 }

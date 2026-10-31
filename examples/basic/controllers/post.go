@@ -466,7 +466,7 @@ func (pc *PostController) ActionShow(c *web.Context) error {
 		Breadcrumbs:  views.Breadcrumbs(ctx, post.Title),
 		Detail:       detail,
 		Title:        post.Title,
-		PermalinkURL: url.ToAbsolute("post/show", url.P{"id": postID(post)}),
+		PermalinkURL: url.Build("post/show", url.P{"id": postID(post)}).Absolute(),
 		CanUpdate:    can(c, "post/update"),
 		CanDelete:    can(c, "post/delete"),
 		EditURL:      url.To("post/edit", url.P{"id": postID(post)}),

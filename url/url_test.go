@@ -158,99 +158,94 @@ func TestToUsesDefaultManager(t *testing.T) {
 	}
 }
 
-func TestAbsoluteURLPrefixesHostInfo(t *testing.T) {
+func TestBuildAbsolutePrefixesHostInfo(t *testing.T) {
+	url.SetDefault(nil)
+	defer url.SetDefault(nil)
+
 	m := url.NewManager()
 	m.SetHostInfo("https://example.com")
 	m.Add("post/view", "/post/{id:[0-9]+}")
+	url.SetDefault(m)
 
-	got, err := m.AbsoluteURL("post/view", url.P{"id": "7"})
-	if err != nil {
-		t.Fatalf("AbsoluteURL(post/view) error: %v", err)
-	}
-	if got != "https://example.com/post/7" {
-		t.Errorf("AbsoluteURL = %q, want https://example.com/post/7", got)
+	if got := url.Build("post/view", url.P{"id": "7"}).Absolute(); got != "https://example.com/post/7" {
+		t.Errorf("Build(post/view).Absolute() = %q, want https://example.com/post/7", got)
 	}
 }
 
-func TestAbsoluteURLKeepsPort(t *testing.T) {
+func TestBuildAbsoluteKeepsPort(t *testing.T) {
+	url.SetDefault(nil)
+	defer url.SetDefault(nil)
+
 	m := url.NewManager()
 	m.SetHostInfo("http://localhost:8080")
 	m.Add("home", "/")
+	url.SetDefault(m)
 
-	got, err := m.AbsoluteURL("home", nil)
-	if err != nil {
-		t.Fatalf("AbsoluteURL(home) error: %v", err)
-	}
-	if got != "http://localhost:8080/" {
-		t.Errorf("AbsoluteURL = %q, want http://localhost:8080/", got)
+	if got := url.Build("home", nil).Absolute(); got != "http://localhost:8080/" {
+		t.Errorf("Build(home).Absolute() = %q, want http://localhost:8080/", got)
 	}
 }
 
 func TestSetHostInfoTrailingSlashTolerated(t *testing.T) {
-	build := func(raw string) string {
+	absolute := func(raw string) string {
+		url.SetDefault(nil)
+		defer url.SetDefault(nil)
+
 		m := url.NewManager()
 		m.SetHostInfo(raw)
 		m.Add("post/view", "/post/{id}")
-		got, err := m.AbsoluteURL("post/view", url.P{"id": "3"})
-		if err != nil {
-			t.Fatalf("AbsoluteURL after SetHostInfo(%q) error: %v", raw, err)
-		}
-		return got
+		url.SetDefault(m)
+		return url.Build("post/view", url.P{"id": "3"}).Absolute()
 	}
-	plain := build("https://example.com")
+	plain := absolute("https://example.com")
 	if plain != "https://example.com/post/3" {
-		t.Errorf("AbsoluteURL = %q, want https://example.com/post/3", plain)
+		t.Errorf("Absolute() = %q, want https://example.com/post/3", plain)
 	}
-	if slash := build("https://example.com/"); slash != plain {
+	if slash := absolute("https://example.com/"); slash != plain {
 		t.Errorf("trailing slash = %q, want identical to %q", slash, plain)
 	}
 }
 
-func TestAbsoluteURLConventionFallback(t *testing.T) {
+func TestBuildAbsoluteConventionFallback(t *testing.T) {
+	url.SetDefault(nil)
+	defer url.SetDefault(nil)
+
 	m := url.NewManager()
 	m.SetHostInfo("https://example.com")
+	url.SetDefault(m)
 
-	got, err := m.AbsoluteURL("site/hello", nil)
-	if err != nil {
-		t.Fatalf("AbsoluteURL(site/hello) error: %v", err)
+	if got := url.Build("site/hello", nil).Absolute(); got != "https://example.com/site/hello" {
+		t.Errorf("Build(site/hello).Absolute() = %q, want https://example.com/site/hello by convention", got)
 	}
-	if got != "https://example.com/site/hello" {
-		t.Errorf("AbsoluteURL = %q, want https://example.com/site/hello by convention", got)
-	}
-
-	got, err = m.AbsoluteURL("post/view", url.P{"tag": "go", "id": "7"})
-	if err != nil {
-		t.Fatalf("AbsoluteURL(post/view) error: %v", err)
-	}
-	if got != "https://example.com/post/view?id=7&tag=go" {
-		t.Errorf("AbsoluteURL = %q, want https://example.com/post/view?id=7&tag=go (keys sorted)", got)
+	if got := url.Build("post/view", url.P{"tag": "go", "id": "7"}).Absolute(); got != "https://example.com/post/view?id=7&tag=go" {
+		t.Errorf("Build(post/view).Absolute() = %q, want https://example.com/post/view?id=7&tag=go (keys sorted)", got)
 	}
 }
 
-func TestAbsoluteURLWithoutHostInfoIsError(t *testing.T) {
+func TestBuildAbsoluteWithoutHostInfoIsHash(t *testing.T) {
+	url.SetDefault(nil)
+	defer url.SetDefault(nil)
+
 	m := url.NewManager()
 	m.Add("post/view", "/post/{id}")
+	url.SetDefault(m)
 
-	_, err := m.AbsoluteURL("post/view", url.P{"id": "7"})
-	if err == nil {
-		t.Fatal("AbsoluteURL without host info must error, not emit a relative URL")
-	}
-	if !strings.Contains(err.Error(), "host info") {
-		t.Errorf("error = %v, want it to name the missing host info", err)
+	if got := url.Build("post/view", url.P{"id": "7"}).Absolute(); got != "#" {
+		t.Errorf("Absolute() without host info = %q, want # (no half-configured absolute URL)", got)
 	}
 }
 
-func TestAbsoluteURLMissingPathParamIsError(t *testing.T) {
+func TestBuildAbsoluteMissingPathParamIsHash(t *testing.T) {
+	url.SetDefault(nil)
+	defer url.SetDefault(nil)
+
 	m := url.NewManager()
 	m.SetHostInfo("https://example.com")
 	m.Add("post/view", "/post/{id:[0-9]+}")
+	url.SetDefault(m)
 
-	_, err := m.AbsoluteURL("post/view", nil)
-	if err == nil {
-		t.Fatal("AbsoluteURL with a missing path parameter must error")
-	}
-	if !strings.Contains(err.Error(), "id") {
-		t.Errorf("error = %v, want it to name the missing parameter", err)
+	if got := url.Build("post/view", nil).Absolute(); got != "#" {
+		t.Errorf("Absolute() with a missing path parameter = %q, want #", got)
 	}
 }
 
@@ -282,7 +277,7 @@ func TestSetHostInfoPanicsOnInvalidValues(t *testing.T) {
 	}
 }
 
-func TestToAbsoluteUsesDefaultManager(t *testing.T) {
+func TestBuildUsesDefaultManager(t *testing.T) {
 	url.SetDefault(nil)
 	defer url.SetDefault(nil)
 
@@ -291,28 +286,118 @@ func TestToAbsoluteUsesDefaultManager(t *testing.T) {
 	m.Add("post/view", "/post/{id:[0-9]+}")
 	url.SetDefault(m)
 
-	if got := url.ToAbsolute("post/view", url.P{"id": "5"}); got != "https://example.com/post/5" {
-		t.Errorf("ToAbsolute(named) = %q, want https://example.com/post/5", got)
+	if got := url.Build("post/view", url.P{"id": "5"}).Absolute(); got != "https://example.com/post/5" {
+		t.Errorf("Build(named).Absolute() = %q, want https://example.com/post/5", got)
 	}
-	if got := url.ToAbsolute("site/hello", nil); got != "https://example.com/site/hello" {
-		t.Errorf("ToAbsolute(unnamed) = %q, want https://example.com/site/hello by convention", got)
+	if got := url.Build("site/hello", nil).Absolute(); got != "https://example.com/site/hello" {
+		t.Errorf("Build(unnamed).Absolute() = %q, want https://example.com/site/hello by convention", got)
 	}
-	if got := url.ToAbsolute("post/view", nil); got != "#" {
-		t.Errorf("ToAbsolute with a missing path parameter = %q, want #", got)
+	if got := url.Build("post/view", nil).Absolute(); got != "#" {
+		t.Errorf("Build with a missing path parameter .Absolute() = %q, want #", got)
 	}
 
 	bare := url.NewManager()
 	bare.Add("post/view", "/post/{id:[0-9]+}")
 	url.SetDefault(bare)
-	if got := url.ToAbsolute("post/view", url.P{"id": "5"}); got != "#" {
-		t.Errorf("ToAbsolute without host info = %q, want #", got)
+	if got := url.Build("post/view", url.P{"id": "5"}).Absolute(); got != "#" {
+		t.Errorf("Build without host info .Absolute() = %q, want #", got)
+	}
+}
+
+func TestBuildStringMatchesTo(t *testing.T) {
+	url.SetDefault(nil)
+	defer url.SetDefault(nil)
+
+	m := url.NewManager()
+	m.SetHostInfo("https://example.com")
+	m.Add("post/view", "/post/{id:[0-9]+}")
+	m.Add("post/list", "/post/list")
+	url.SetDefault(m)
+
+	cases := []struct {
+		name   string
+		params url.P
+		want   string
+	}{
+		{"post/view", url.P{"id": "7"}, "/post/7"},
+		{"post/list", url.P{"tag": "go", "page": "2"}, "/post/list?page=2&tag=go"},
+		{"site/hello", nil, "/site/hello"},
+		{"post/view", nil, "#"},
+	}
+	for _, tc := range cases {
+		b := url.Build(tc.name, tc.params)
+		if got := b.String(); got != tc.want {
+			t.Errorf("Build(%q).String() = %q, want %q", tc.name, got, tc.want)
+		}
+		if viaTo := url.To(tc.name, tc.params); viaTo != tc.want {
+			t.Errorf("To(%q) = %q, want %q (String and To must agree)", tc.name, viaTo, tc.want)
+		}
+	}
+}
+
+func TestBuildHostOverridesPrefix(t *testing.T) {
+	url.SetDefault(nil)
+	defer url.SetDefault(nil)
+
+	m := url.NewManager()
+	m.SetHostInfo("https://example.com")
+	m.Add("post/view", "/post/{id}")
+	url.SetDefault(m)
+
+	if got := url.Build("post/view", url.P{"id": "7"}).Host("https://backend.example.com").Absolute(); got != "https://backend.example.com/post/7" {
+		t.Errorf("Host override = %q, want https://backend.example.com/post/7", got)
+	}
+	if got := url.Build("post/view", url.P{"id": "7"}).Host("https://backend.example.com/").Absolute(); got != "https://backend.example.com/post/7" {
+		t.Errorf("Host override with trailing slash = %q, want identical to without", got)
+	}
+	// String ignores the host override: it is a relative rendering.
+	if got := url.Build("post/view", url.P{"id": "7"}).Host("https://backend.example.com").String(); got != "/post/7" {
+		t.Errorf("Host override then String = %q, want /post/7", got)
+	}
+	// An explicit host also serves a manager that never got host info.
+	bare := url.NewManager()
+	bare.Add("post/view", "/post/{id}")
+	url.SetDefault(bare)
+	if got := url.Build("post/view", url.P{"id": "7"}).Host("http://localhost:8080").Absolute(); got != "http://localhost:8080/post/7" {
+		t.Errorf("Host on a manager without host info = %q, want http://localhost:8080/post/7", got)
+	}
+}
+
+func TestBuildHostInvalidValuesAnswerHash(t *testing.T) {
+	url.SetDefault(nil)
+	defer url.SetDefault(nil)
+
+	m := url.NewManager()
+	m.SetHostInfo("https://example.com")
+	m.Add("post/view", "/post/{id}")
+	url.SetDefault(m)
+
+	// Same invalid shapes SetHostInfo rejects at boot; here they must only
+	// degrade the answer to "#", never panic on the request path.
+	for _, h := range []string{
+		"example.com",
+		"//example.com",
+		"https://",
+		"https:///post",
+		"://example.com",
+		"https://u@example.com",
+		"https://example.com/base",
+		"https://example.com/?q=1",
+	} {
+		if got := url.Build("post/view", url.P{"id": "7"}).Host(h).Absolute(); got != "#" {
+			t.Errorf("Host(%q).Absolute() = %q, want #", h, got)
+		}
 	}
 }
 
 func TestSetHostInfoConcurrentWithReads(t *testing.T) {
+	url.SetDefault(nil)
+	defer url.SetDefault(nil)
+
 	m := url.NewManager()
 	m.Add("post/view", "/post/{id}")
 	m.SetHostInfo("https://example.com")
+	url.SetDefault(m)
 
 	done := make(chan struct{})
 	go func() {
@@ -325,12 +410,8 @@ func TestSetHostInfoConcurrentWithReads(t *testing.T) {
 		if _, err := m.URL("post/view", url.P{"id": "7"}); err != nil {
 			t.Fatalf("URL during concurrent SetHostInfo error: %v", err)
 		}
-		got, err := m.AbsoluteURL("post/view", url.P{"id": "7"})
-		if err != nil {
-			t.Fatalf("AbsoluteURL during concurrent SetHostInfo error: %v", err)
-		}
-		if got != "https://example.com/post/7" {
-			t.Fatalf("AbsoluteURL = %q, want https://example.com/post/7", got)
+		if got := url.Build("post/view", url.P{"id": "7"}).Absolute(); got != "https://example.com/post/7" {
+			t.Fatalf("Build().Absolute() during concurrent SetHostInfo = %q, want https://example.com/post/7", got)
 		}
 	}
 	<-done

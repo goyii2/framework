@@ -48,7 +48,7 @@ func (m *Manager) Add(name, pattern string) {
 }
 
 // SetHostInfo sets the scheme-and-host prefix ("scheme://host[:port]") that
-// AbsoluteURL and ToAbsolute put in front of generated URLs. It is written
+// absolute URL generation puts in front of generated URLs. It is written
 // once at boot by wiring code and only read afterwards; a trailing slash is
 // tolerated and normalized away, so "https://example.com/" and
 // "https://example.com" yield the same URLs. A value without a scheme or
@@ -57,14 +57,27 @@ func (m *Manager) Add(name, pattern string) {
 // Add: continuing would hand half-configured absolute URLs to consumers
 // with no request context to notice, such as mailers and OAuth callbacks.
 func (m *Manager) SetHostInfo(raw string) {
-	u, err := neturl.Parse(strings.TrimRight(raw, "/"))
-	if err != nil || u.User != nil || u.Scheme == "" || u.Host == "" ||
-		strings.TrimSuffix(u.Path, "/") != "" || u.RawQuery != "" || u.Fragment != "" {
-		panic(fmt.Sprintf("url: invalid host info %q: want scheme://host[:port] (boot-time wiring mistake)", raw))
+	hostInfo, err := normalizeHostInfo(raw)
+	if err != nil {
+		panic(fmt.Sprintf("%s (boot-time wiring mistake)", err))
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.hostInfo = u.Scheme + "://" + u.Host
+	m.hostInfo = hostInfo
+}
+
+// normalizeHostInfo validates and normalizes a scheme-and-host prefix: a
+// trailing slash is tolerated, anything beyond scheme://host[:port] — no
+// scheme, no host, userinfo, a path, a query, a fragment — is rejected.
+// Boot-time wiring (SetHostInfo) and per-build host overrides (Builder.Host)
+// funnel through here so the accepted shape is identical everywhere.
+func normalizeHostInfo(raw string) (string, error) {
+	u, err := neturl.Parse(strings.TrimRight(raw, "/"))
+	if err != nil || u.User != nil || u.Scheme == "" || u.Host == "" ||
+		strings.TrimSuffix(u.Path, "/") != "" || u.RawQuery != "" || u.Fragment != "" {
+		return "", fmt.Errorf("url: invalid host info %q: want scheme://host[:port]", raw)
+	}
+	return u.Scheme + "://" + u.Host, nil
 }
 
 // Has reports whether name is registered.
@@ -87,16 +100,17 @@ func (m *Manager) URL(name string, params P) (string, error) {
 	if !ok {
 		return convention(name, params), nil
 	}
-	return build(name, pattern, params)
+	return renderPattern(name, pattern, params)
 }
 
-// AbsoluteURL builds the absolute URL for name: exactly the generation
+// absoluteURL builds the absolute URL for name: exactly the generation
 // rules of URL (registered names render through their pattern, unregistered
 // names assemble by convention) with the configured host info in front.
 // Without host info it is an explicit error rather than a half URL —
 // absolute generation only makes sense once wiring has supplied the scheme
-// and host. Consumers that prefer a placeholder over an error use ToAbsolute.
-func (m *Manager) AbsoluteURL(name string, params P) (string, error) {
+// and host. It backs the builder's Absolute, which turns its failures into
+// the "#" cannot-create marker.
+func (m *Manager) absoluteURL(name string, params P) (string, error) {
 	m.mu.RLock()
 	hostInfo := m.hostInfo
 	m.mu.RUnlock()
@@ -110,9 +124,9 @@ func (m *Manager) AbsoluteURL(name string, params P) (string, error) {
 	return hostInfo + rel, nil
 }
 
-// build fills the wildcards of a ServeMux path pattern with params and
-// appends the leftovers as a sorted query string.
-func build(name, pattern string, params P) (string, error) {
+// renderPattern fills the wildcards of a ServeMux path pattern with params
+// and appends the leftovers as a sorted query string.
+func renderPattern(name, pattern string, params P) (string, error) {
 	rest := make(map[string]string, len(params))
 	for k, v := range params {
 		rest[k] = v
@@ -191,12 +205,12 @@ func wildcardName(seg string) (string, bool) {
 	return inner, multi
 }
 
-// defaultManager holds the package-level default manager behind To.
+// defaultManager holds the package-level default manager behind To and Build.
 var defaultManager atomic.Pointer[Manager]
 
-// Default returns the package-level default manager used by To; it is
-// created lazily and stays empty until an application installs its route
-// table with SetDefault.
+// Default returns the package-level default manager used by To and Build;
+// it is created lazily and stays empty until an application installs its
+// route table with SetDefault.
 func Default() *Manager {
 	if m := defaultManager.Load(); m != nil {
 		return m
@@ -208,8 +222,8 @@ func Default() *Manager {
 	return defaultManager.Load()
 }
 
-// SetDefault installs m as the package-level default behind To; nil resets
-// it to a fresh empty manager.
+// SetDefault installs m as the package-level default behind To and Build;
+// nil resets it to a fresh empty manager.
 func SetDefault(m *Manager) { defaultManager.Store(m) }
 
 // To builds the URL for name through the default manager: registered names
@@ -224,15 +238,72 @@ func To(name string, params P) string {
 	return u
 }
 
-// ToAbsolute builds the absolute URL for name through the default manager.
-// It is the error-swallowing counterpart of AbsoluteURL, as To is of URL:
-// any failure — host info not configured, a registered route lacking a
-// path parameter — returns "#", the cannot-create marker, instead of a
-// broken URL.
-func ToAbsolute(name string, params P) string {
-	u, err := Default().AbsoluteURL(name, params)
+// Builder is a chainable URL generator seeded by Build. Chaining is the Go
+// rendering of Yii2's optional second Url::to argument: the choice between
+// a relative and an absolute URL happens at the call site (how far the
+// chain runs), while the value comes from configuration (the manager holds
+// the host info). The intended lifetime is a single expression:
+//
+//	url.Build("post/view", url.P{"id": "7"}).Absolute()
+//
+// The name avoids calling the type URL, which would read as net/url.URL.
+type Builder struct {
+	m      *Manager
+	name   string
+	params P
+	host   string // explicit scheme-and-host override for this build only; empty means the manager's host info
+}
+
+// Build starts URL generation for name through the default manager, the
+// same table behind To. Finish the chain with String for a relative URL or
+// Absolute for a full one.
+func Build(name string, params P) Builder {
+	return Builder{m: Default(), name: name, params: params}
+}
+
+// Host pins the scheme-and-host prefix for this build only, overriding the
+// manager's host info — the cross-partition / multi-tenant case where one
+// deployment must emit links on another deployment's domain. The value is
+// validated when Absolute runs (same shape as SetHostInfo, trailing slash
+// tolerated); an invalid one makes Absolute answer "#" rather than panic on
+// the request path. An empty h clears a previous override.
+func (b Builder) Host(h string) Builder {
+	b.host = h
+	return b
+}
+
+// String finishes the build with a relative URL: the same outcome as
+// To(name, params), "#" when generation fails (a registered route lacking
+// a path parameter). The host info and any Host override play no part.
+func (b Builder) String() string {
+	rel, err := b.m.URL(b.name, b.params)
 	if err != nil {
 		return "#"
 	}
-	return u
+	return rel
+}
+
+// Absolute finishes the build with a full URL: the prefix from Host when
+// one was given, otherwise the manager's host info, in front of the same
+// relative URL String would produce. Any failure — host info not
+// configured, an invalid Host value, a registered route lacking a path
+// parameter — answers "#", the cannot-create marker, so URL assembly never
+// panics on the request path.
+func (b Builder) Absolute() string {
+	if b.host == "" {
+		u, err := b.m.absoluteURL(b.name, b.params)
+		if err != nil {
+			return "#"
+		}
+		return u
+	}
+	prefix, err := normalizeHostInfo(b.host)
+	if err != nil {
+		return "#"
+	}
+	rel, err := b.m.URL(b.name, b.params)
+	if err != nil {
+		return "#"
+	}
+	return prefix + rel
 }
