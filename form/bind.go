@@ -113,10 +113,8 @@ func bindJSONValues(ctx context.Context, payload map[string]any, dst any) *valid
 		if !ok {
 			continue
 		}
-		if fv := v.Field(i); fv.Kind() == reflect.String {
-			if s, ok := value.(string); ok {
-				fv.SetString(s)
-			}
+		if msg := setJSONField(v.Field(i), value); msg != "" {
+			fields[name] = append(fields[name], msg)
 		}
 	}
 	if len(fields) == 0 {
@@ -182,6 +180,96 @@ func translateMessages(ctx context.Context, fields map[string][]string) {
 		}
 		fields[field] = translated
 	}
+}
+
+// setJSONField assigns one decoded JSON value to the addressable field fv and
+// returns "" on success, or the message id describing why the value did not
+// fit. JSON carries typed values, so a value whose kind does not match the
+// field — a string sent to an int field, a number to a text field — is a type
+// mismatch reported with the message of what the field needed, exactly like an
+// unparseable text in the form source. Numbers keep their literal wire form
+// (json.Number), so an integer field never silently rounds 19.5 or a big
+// literal. A null value binds nothing. A tagged field of a type outside the
+// supported set is a programming error and panics when a value arrives for it.
+func setJSONField(fv reflect.Value, value any) string {
+	if value == nil {
+		return ""
+	}
+
+	// time.Time gets its own message; the generic TextUnmarshaler branch
+	// below would also parse it but report it as an opaque bad value.
+	if fv.Type() == timeType {
+		s, ok := value.(string)
+		if !ok {
+			return msgDateTime
+		}
+		parsed, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			return msgDateTime
+		}
+		fv.Set(reflect.ValueOf(parsed))
+		return ""
+	}
+	// Custom parsing wins over the generic kinds, but only for text: a
+	// TextUnmarshaler field decodes itself from the string form of its value.
+	if u, ok := fv.Addr().Interface().(encoding.TextUnmarshaler); ok {
+		s, ok := value.(string)
+		if !ok {
+			return msgValue
+		}
+		if err := u.UnmarshalText([]byte(s)); err != nil {
+			return msgValue
+		}
+		return ""
+	}
+
+	switch fv.Kind() {
+	case reflect.String:
+		s, ok := value.(string)
+		if !ok {
+			return msgValue
+		}
+		fv.SetString(s)
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		n, ok := value.(json.Number)
+		if !ok {
+			return msgInteger
+		}
+		parsed, err := strconv.ParseInt(n.String(), 10, fv.Type().Bits())
+		if err != nil {
+			return msgInteger
+		}
+		fv.SetInt(parsed)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		n, ok := value.(json.Number)
+		if !ok {
+			return msgInteger
+		}
+		parsed, err := strconv.ParseUint(n.String(), 10, fv.Type().Bits())
+		if err != nil {
+			return msgInteger
+		}
+		fv.SetUint(parsed)
+	case reflect.Float32, reflect.Float64:
+		n, ok := value.(json.Number)
+		if !ok {
+			return msgNumber
+		}
+		parsed, err := strconv.ParseFloat(n.String(), fv.Type().Bits())
+		if err != nil {
+			return msgNumber
+		}
+		fv.SetFloat(parsed)
+	case reflect.Bool:
+		b, ok := value.(bool)
+		if !ok {
+			return msgBoolean
+		}
+		fv.SetBool(b)
+	default:
+		panic(fmt.Sprintf("form: field of type %s is not supported by form binding", fv.Type()))
+	}
+	return ""
 }
 
 // setField assigns vals to the addressable field fv and returns "" on
