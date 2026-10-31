@@ -1,6 +1,6 @@
 # 03: form.Load 闭环 + web.Context 便捷方法 + form.Values 回填导出
 
-Status: ready-for-agent
+Status: claimed
 
 **What to build:** 表单模型闭环的机制层收口：`form.Load(ctx, r, &f, scenario)` 按分发完成绑定后，对实现了 `validators.Ruled` 的 struct 调 `validators.Validate`，绑定错误与校验错误**统一**为 `*validators.Errors` 返回（nil = 通过）；未实现 `Ruled` 时仅绑定不校验。`web.Context` 增薄委托便捷方法（一行转发到 form 包，不引入第二套逻辑）。`form.Values(f)` 反射导出 `map[string]string`（按 `form` tag 取键，各类型导出为字符串），供 ActiveForm 的 `Values` 回填，替代手写 map。
 
