@@ -266,6 +266,29 @@ func setJSONField(fv reflect.Value, value any) string {
 			return msgBoolean
 		}
 		fv.SetBool(b)
+	case reflect.Slice:
+		if fv.Type().Elem().Kind() != reflect.String {
+			panic(fmt.Sprintf("form: field of type %s is not supported by form binding", fv.Type()))
+		}
+		switch val := value.(type) {
+		case string:
+			// A lone string mirrors a form carrying a single submitted value.
+			out := reflect.MakeSlice(fv.Type(), 1, 1)
+			out.Index(0).SetString(val)
+			fv.Set(out)
+		case []any:
+			out := reflect.MakeSlice(fv.Type(), len(val), len(val))
+			for i, el := range val {
+				s, ok := el.(string)
+				if !ok {
+					return msgValue
+				}
+				out.Index(i).SetString(s)
+			}
+			fv.Set(out)
+		default:
+			return msgValue
+		}
 	default:
 		panic(fmt.Sprintf("form: field of type %s is not supported by form binding", fv.Type()))
 	}

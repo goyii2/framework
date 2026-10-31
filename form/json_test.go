@@ -155,3 +155,58 @@ func TestJSONValueKindMismatchOnStringFieldFails(t *testing.T) {
 		t.Errorf("Note = %q, want the zero value", f.Note)
 	}
 }
+
+func TestJSONArrayValuesBindStringSlice(t *testing.T) {
+	// A JSON array is the []string shape; a lone string mirrors a form with a
+	// single submitted value and binds a one-element list.
+	f := allTypes{}
+	if errs := Bind(jsonRequest(`{"tags": ["go", "web"]}`), &f); errs != nil {
+		t.Fatalf("Bind = %v, want nil", errs)
+	}
+	if len(f.Tags) != 2 || f.Tags[0] != "go" || f.Tags[1] != "web" {
+		t.Errorf("Tags = %q, want [go web]", f.Tags)
+	}
+	f = allTypes{}
+	if errs := Bind(jsonRequest(`{"tags": "solo"}`), &f); errs != nil {
+		t.Fatalf("Bind(lone string) = %v, want nil", errs)
+	}
+	if len(f.Tags) != 1 || f.Tags[0] != "solo" {
+		t.Errorf("Tags = %q, want [solo]", f.Tags)
+	}
+	// An explicitly empty array states "no values" and assigns an empty list.
+	f = allTypes{}
+	if errs := Bind(jsonRequest(`{"tags": []}`), &f); errs != nil {
+		t.Fatalf("Bind(empty array) = %v, want nil", errs)
+	}
+	if f.Tags == nil || len(f.Tags) != 0 {
+		t.Errorf("Tags = %#v, want an assigned empty list", f.Tags)
+	}
+}
+
+func TestJSONArraysOfNonStringsAndNestedObjectsFailPerField(t *testing.T) {
+	// Array elements must all be text; nested objects never bind a scalar
+	// field — they are a type error under the field's own message, mirroring
+	// the form source reporting its fields in field terms.
+	f := allTypes{}
+	errs := Bind(jsonRequest(`{"tags": ["go", 2]}`), &f)
+	if errs == nil {
+		t.Fatal("Bind = nil, want a field error")
+	}
+	if got := errs.Fields["tags"]; len(got) != 1 || got[0] != "not a valid value" {
+		t.Errorf(`Fields["tags"] = %q, want the value message`, got)
+	}
+	if f.Tags != nil {
+		t.Errorf("Tags = %q, want no assignment", f.Tags)
+	}
+	f = allTypes{}
+	errs = Bind(jsonRequest(`{"age": {"value": 42}}`), &f)
+	if errs == nil {
+		t.Fatal("Bind = nil, want a field error")
+	}
+	if got := errs.Fields["age"]; len(got) != 1 || got[0] != "not a valid integer" {
+		t.Errorf(`Fields["age"] = %q, want the integer message`, got)
+	}
+	if f.Age != 0 {
+		t.Errorf("Age = %d, want the zero value", f.Age)
+	}
+}
