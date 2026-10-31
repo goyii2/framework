@@ -92,6 +92,11 @@ func bindJSONBody(r *http.Request, dst any) *validators.Errors {
 	if err := dec.Decode(&payload); err != nil {
 		return rootBodyError(r.Context(), msgJSONBody)
 	}
+	// A whole-body null decodes into a nil map without erroring; it is as
+	// little a form payload as a bare array or scalar.
+	if payload == nil {
+		return rootBodyError(r.Context(), msgJSONBody)
+	}
 	if dec.More() {
 		return rootBodyError(r.Context(), msgJSONBody)
 	}

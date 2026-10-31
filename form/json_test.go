@@ -262,6 +262,7 @@ func TestMalformedJSONBodyReportsRootError(t *testing.T) {
 	for name, body := range map[string]string{
 		"truncated":     `{"login": "ada"`,
 		"non-object":    `["login", "ada"]`,
+		"null body":     `null`,
 		"trailing-junk": `{"login": "ada"} oops`,
 		"two values":    `{"login": "ada"}{"login": "bob"}`,
 	} {
