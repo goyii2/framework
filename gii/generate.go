@@ -5,7 +5,6 @@ import (
 	"go/format"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"text/template"
 
@@ -216,9 +215,19 @@ var textualDBTypes = map[string]bool{
 	"text": true, "tinytext": true, "mediumtext": true, "longtext": true, "clob": true,
 }
 
-// timestampColumns are the conventionally server-stamped columns: the CRUD
-// form skips them and the Rules skeleton leaves them alone.
+// timestampColumns are the conventionally server-stamped columns: they stay
+// out of the binding whitelist and the Rules skeleton leaves them alone.
 var timestampColumns = map[string]bool{"created_at": true, "updated_at": true}
+
+// formTagged reports whether a column joins the model's binding whitelist:
+// the generated model tags it with a `form` tag, so the write actions bind
+// request values straight into the record. The primary key, reference-style
+// columns (an "_id" suffix), binary columns and the server-stamped timestamp
+// columns stay out — they are server-side state a submission must not carry.
+func formTagged(c Column) bool {
+	return !c.PrimaryKey && c.Kind() != KindBytes && !timestampColumns[c.Name] &&
+		!strings.HasSuffix(c.Name, "_id")
+}
 
 // modelField is one struct field of a generated model plus its Rules
 // skeleton pieces.
@@ -231,6 +240,9 @@ type modelField struct {
 	Type string
 	// GormTag is the gorm struct tag's value.
 	GormTag string
+	// FormTag is the form binding tag's name — the binding whitelist; ""
+	// leaves the column server-side only.
+	FormTag string
 	// Comment is a trailing field comment; "" renders none.
 	Comment string
 	// Rule is the z.Shape entry of the Rules skeleton, "" when none was
@@ -274,6 +286,9 @@ func buildModelData(t *Table, pkg string) modelData {
 			}
 		}
 		field.GormTag = tag
+		if formTagged(c) {
+			field.FormTag = c.Name
+		}
 		if c.Unmapped {
 			field.Comment = "TODO: unmapped type " + c.DBType + " — adjust the Go type"
 		}
@@ -314,6 +329,10 @@ func ruleSkeleton(c Column) (rule string, notes []string) {
 	} else {
 		notes = append(notes, fmt.Sprintf("// TODO %q: %s column — no rule guessed.", c.Name, c.Kind()))
 	}
+	if strings.HasSuffix(c.Name, "_id") && !c.PrimaryKey {
+		notes = append(notes, fmt.Sprintf("// TODO %q: reference column — set it in server code after the"+
+			" binding; add a `form` tag only if submissions may carry it.", c.Name))
+	}
 	if c.Unique {
 		notes = append(notes, fmt.Sprintf("// TODO %q: carries a unique index — consider a uniqueness check.", c.Name))
 	}
@@ -352,9 +371,14 @@ type crudColumn struct {
 	Attr      string
 	Label     string
 	ValueCode string
+	// FilterInput renders a filter-row cell for the column: the string
+	// columns the grid shows (the textual column types are left out of the
+	// grid entirely).
+	FilterInput bool
 }
 
-// crudFormField is one ActiveForm field of the CRUD form.
+// crudFormField is one ActiveForm field of the CRUD form — the form-tagged
+// columns only, so every rendered input actually binds.
 type crudFormField struct {
 	// Name is the form field name — the column name.
 	Name string
@@ -362,17 +386,26 @@ type crudFormField struct {
 	Label string
 	// InputType is the view.ActiveField input constant ("view.FieldText").
 	InputType string
+	// Placeholder shows the value shape the binding layer parses; set on
+	// the RFC 3339 text inputs of the datetime columns.
+	Placeholder string
 	// Required and MaxLength carry the native attributes the column
 	// suggests.
 	Required  bool
 	MaxLength int64
-	// GoName is the form input struct's field name.
+}
+
+// crudFilterField is one column of the listing's filter struct: string
+// columns match by containment, every other column compares exactly.
+type crudFilterField struct {
+	// Name is the query parameter name — the column name.
+	Name string
+	// GoName is the filter struct's exported field name.
 	GoName string
-	// ApplyCode writes the submitted value into the record; parse failures
-	// report through the apply function's invalid closure.
-	ApplyCode string
-	// ValueStmt fills the form's echo map from the record's value.
-	ValueStmt string
+	// Type is the filter struct field's Go type.
+	Type string
+	// Clause is the field's narrowing statement inside Apply.
+	Clause string
 }
 
 // crudData drives the CRUD controller and view templates.
@@ -390,23 +423,24 @@ type crudData struct {
 	Sortable    []string
 	GridColumns []crudColumn
 	FormFields  []crudFormField
+	// FilterFields drives the listing's filter struct; FilterInputs lists
+	// the grid columns that render a filter-row input.
+	FilterFields []crudFilterField
+	FilterInputs []string
 
 	// The Uses* flags keep the generated imports and helpers down to what
-	// the table actually needs: the time import, the formTimeLayout const
-	// and the timeValue helper, the nullable/checkbox helpers, and the
-	// parse-failure closure of the apply function.
-	UsesTime        bool
-	UsesTimeHelpers bool
-	UsesStringPtr   bool
-	UsesBoolPtr     bool
-	UsesCheckbox    bool
-	UsesInvalid     bool
+	// the table actually needs: the time import (a datetime key or filter
+	// field) and the LIKE escape helpers of the string filters.
+	UsesTime bool
+	UsesLike bool
 }
 
 // buildCrudData assembles the CRUD templates' view of a table: the grid
-// skips textual and binary columns, the form skips the key and the
-// timestamp columns, and everything else renders with the input type its
-// database type suggests.
+// skips the key, the textual and the binary columns, and everything else
+// renders with the input type its database type suggests. The form fields
+// and the listing's filter struct follow the model's binding whitelist —
+// the form-tagged columns of buildModelData — so every rendered input and
+// filter actually binds.
 func buildCrudData(t *Table, table, pkg string) (*crudData, error) {
 	pk := t.PrimaryKey()
 	if pk == nil {
@@ -440,6 +474,7 @@ func buildCrudData(t *Table, table, pkg string) (*crudData, error) {
 		data.PK.Pattern = "{" + pk.Name + "}"
 		data.PK.ZeroCheck = fmt.Sprintf("!%s.%s.IsZero()", data.ModelVar, data.PK.GoName)
 		data.PK.ValueExpr = fmt.Sprintf("%s.%s.Format(time.RFC3339)", data.ModelVar, data.PK.GoName)
+		data.UsesTime = true
 	default:
 		data.PK.Pattern = "{" + pk.Name + "}"
 		data.PK.ZeroCheck = fmt.Sprintf("%s.%s != \"\"", data.ModelVar, data.PK.GoName)
@@ -447,39 +482,38 @@ func buildCrudData(t *Table, table, pkg string) (*crudData, error) {
 	}
 
 	for _, c := range t.Columns {
-		if c.Kind() == KindTime {
-			data.UsesTime = true
+		if c.Kind() == KindBytes {
+			// Binary columns have no text form to bind, render or filter.
+			continue
 		}
-		if c.PrimaryKey || c.Kind() == KindBytes {
+		if c.PrimaryKey {
+			// The grid skips the key column; the default order already
+			// sorts by it.
 			continue
 		}
 		if !textualDBTypes[c.DBType] {
-			data.GridColumns = append(data.GridColumns, crudColumn{
-				Attr:      c.Name,
-				Label:     label(c.Name),
-				ValueCode: gridValueCode(data.Model, c),
-			})
-			data.Sortable = append(data.Sortable, c.Name)
-		}
-		// The flags track what the form fields — not the grid — need:
-		// helpers and imports that no apply statement uses would not
-		// compile.
-		if !timestampColumns[c.Name] {
-			switch {
-			case c.Kind() == KindTime:
-				data.UsesTimeHelpers = true
-				data.UsesInvalid = true
-			case c.Kind() == KindInt || c.Kind() == KindFloat:
-				data.UsesInvalid = true
-			case c.Kind() == KindBool:
-				data.UsesCheckbox = true
-				if c.Pointer() {
-					data.UsesBoolPtr = true
-				}
-			case c.Kind() == KindString && c.Pointer():
-				data.UsesStringPtr = true
+			column := crudColumn{
+				Attr:        c.Name,
+				Label:       label(c.Name),
+				ValueCode:   gridValueCode(data.Model, c),
+				FilterInput: formTagged(c) && c.Kind() == KindString,
 			}
-			data.FormFields = append(data.FormFields, buildFormField(data.ModelVar, c))
+			data.GridColumns = append(data.GridColumns, column)
+			data.Sortable = append(data.Sortable, c.Name)
+			if column.FilterInput {
+				data.FilterInputs = append(data.FilterInputs, c.Name)
+			}
+		}
+		if !formTagged(c) {
+			continue
+		}
+		if c.Kind() == KindTime {
+			data.UsesTime = true
+		}
+		data.FormFields = append(data.FormFields, buildFormField(c))
+		data.FilterFields = append(data.FilterFields, buildFilterField(c))
+		if c.Kind() == KindString {
+			data.UsesLike = true
 		}
 	}
 	return data, nil
@@ -506,8 +540,11 @@ func gridValueCode(model string, c Column) string {
 }
 
 // inputType maps a column to its ActiveForm input constant: TEXT columns
-// become textareas, numeric columns number inputs, booleans checkboxes,
-// date-ish columns datetime-local pickers and everything else text inputs.
+// become textareas, numeric columns number inputs, booleans checkboxes and
+// everything else text inputs. Datetime columns render as text too — the
+// binding layer parses them as RFC 3339, a format the datetime-local picker
+// cannot submit, so the honest input is text with a placeholder showing the
+// shape.
 func inputType(c Column) string {
 	switch {
 	case textualDBTypes[c.DBType]:
@@ -516,141 +553,66 @@ func inputType(c Column) string {
 		return "view.FieldNumber"
 	case c.Kind() == KindBool:
 		return "view.FieldCheckbox"
-	case c.Kind() == KindTime:
-		return "view.FieldDatetimeLocal"
 	default:
 		return "view.FieldText"
 	}
 }
 
-// buildFormField assembles one form field with its apply and echo code.
-func buildFormField(modelVar string, c Column) crudFormField {
+// buildFormField assembles one ActiveForm field of a form-tagged column.
+func buildFormField(c Column) crudFormField {
 	field := crudFormField{
 		Name:      c.Name,
 		Label:     label(c.Name),
 		InputType: inputType(c),
 		Required:  !c.Nullable && !c.HasDefault,
-		GoName:    lowerName(c.Name),
 	}
 	if c.HasLength && c.Length > 0 && c.Kind() == KindString && !textualDBTypes[c.DBType] {
 		field.MaxLength = c.Length
 	}
-	field.ApplyCode = applyCode(modelVar, c)
-	field.ValueStmt = valueStmt(modelVar, c)
+	if c.Kind() == KindTime {
+		// The binding layer parses datetimes as RFC 3339 text — a format a
+		// datetime-local picker cannot produce — so the placeholder shows
+		// the shape the input wants.
+		field.Placeholder = "2026-01-02T15:04:05Z"
+	}
 	return field
 }
 
-// applyCode builds the statement writing one submitted value into the
-// record. Values that cannot parse report through the invalid closure of
-// the generated apply function; nullable columns left empty stay NULL.
-func applyCode(modelVar string, c Column) string {
-	name := lowerName(c.Name)
-	target := fmt.Sprintf("%s.%s", modelVar, exportedName(c.Name))
-	input := "in." + name
-
-	parse, assign, want := "", "", ""
+// buildFilterField assembles one field of the listing's filter struct with
+// its narrowing clause: string columns match by containment (fully escaped
+// in the generated likePattern helper), every other column compares exactly
+// with its zero value meaning "no filter".
+func buildFilterField(c Column) crudFilterField {
+	field := crudFilterField{
+		Name:   c.Name,
+		GoName: exportedName(c.Name),
+		Type:   filterType(c),
+	}
+	goName := "f." + field.GoName
 	switch c.Kind() {
-	case KindInt:
-		parse = fmt.Sprintf("strconv.ParseInt(%s, 10, %d)", input, intBits(c.GoType))
-		assign = typedAssign(target, "v", c.GoType, c.Pointer())
-		want = "an integer"
-	case KindFloat:
-		parse = fmt.Sprintf("strconv.ParseFloat(%s, 64)", input)
-		assign = typedAssign(target, "v", c.GoType, c.Pointer())
-		want = "a number"
+	case KindString:
+		field.Clause = fmt.Sprintf("if %s != \"\" { query = query.Where(%q+likeEscapeClause, likePattern(%s)) }",
+			goName, c.Name+" LIKE ?", goName)
 	case KindTime:
-		parse = fmt.Sprintf("time.Parse(formTimeLayout, %s)", input)
-		assign = typedAssign(target, "v", c.GoType, c.Pointer())
-		want = "a date and time"
+		field.Clause = fmt.Sprintf("if !%s.IsZero() { query = query.Where(%q, %s) }", goName, c.Name+" = ?", goName)
 	case KindBool:
-		if c.Pointer() {
-			return fmt.Sprintf("%s = boolPtr(%s != \"\")", target, input)
-		}
-		return fmt.Sprintf("%s = %s != \"\"", target, input)
+		// A bool's zero value doubles as "no filter", so the clause can
+		// only narrow to true; filtering false needs a hand-added sentinel.
+		field.Clause = fmt.Sprintf("if %s { query = query.Where(%q, %s) }", goName, c.Name+" = ?", goName)
 	default:
-		if c.Pointer() {
-			return fmt.Sprintf("%s = stringPtr(%s)", target, input)
-		}
-		return fmt.Sprintf("%s = %s", target, input)
+		field.Clause = fmt.Sprintf("if %s != 0 { query = query.Where(%q, %s) }", goName, c.Name+" = ?", goName)
 	}
-
-	call := fmt.Sprintf("if v, err := %s; err == nil { %s } else { invalid(%q, %q) }", parse, assign, c.Name, want)
-	if c.Pointer() {
-		// An empty input on a nullable column means NULL — nothing to
-		// parse, the field keeps its nil.
-		call = fmt.Sprintf("if %s != \"\" { %s }", input, call)
-	}
-	return call
+	return field
 }
 
-// typedAssign builds the assignment of parsed value (int64 from ParseInt,
-// float64 from ParseFloat, time.Time from time.Parse) to target: narrower
-// integer types cast, pointer fields take the address of a local so NULL
-// stays expressible.
-func typedAssign(target, value, goType string, pointer bool) string {
-	if goType == "int" || goType == "int8" || goType == "int16" || goType == "int32" {
-		value = goType + "(" + value + ")"
+// filterType maps a column to its filter struct field's Go type: text
+// columns filter as text (the LIKE pattern), everything else keeps its
+// column type and compares exactly.
+func filterType(c Column) string {
+	if c.Kind() == KindString {
+		return "string"
 	}
-	if !pointer {
-		return fmt.Sprintf("%s = %s", target, value)
-	}
-	return fmt.Sprintf("parsed := %s; %s = &parsed", value, target)
-}
-
-// intBits returns the ParseInt bit width of a Go integer type; "int" uses
-// the platform's int size so overflow is rejected by the parser itself.
-func intBits(goType string) int {
-	switch goType {
-	case "int8":
-		return 8
-	case "int16":
-		return 16
-	case "int32":
-		return 32
-	case "int":
-		return strconv.IntSize
-	default:
-		return 64
-	}
-}
-
-// valueStmt builds the statement filling the form's echo map from the
-// record's current value; nullable values render empty when NULL. The map
-// is keyed by the column name — the ActiveForm field name — while the
-// in-struct field names stay lowerCamel.
-func valueStmt(modelVar string, c Column) string {
-	target := fmt.Sprintf("%s.%s", modelVar, exportedName(c.Name))
-	set := func(expr string) string {
-		return fmt.Sprintf("values[%q] = %s", c.Name, expr)
-	}
-
-	switch c.Kind() {
-	case KindInt:
-		if c.Pointer() {
-			return fmt.Sprintf("if %s != nil { values[%q] = strconv.FormatInt(int64(*%s), 10) }", target, c.Name, target)
-		}
-		return set(fmt.Sprintf("strconv.FormatInt(int64(%s), 10)", target))
-	case KindFloat:
-		if c.Pointer() {
-			return fmt.Sprintf("if %s != nil { values[%q] = strconv.FormatFloat(float64(*%s), 'f', -1, 64) }", target, c.Name, target)
-		}
-		return set(fmt.Sprintf("strconv.FormatFloat(float64(%s), 'f', -1, 64)", target))
-	case KindBool:
-		if c.Pointer() {
-			return fmt.Sprintf("if %s != nil { values[%q] = checkboxValue(*%s) }", target, c.Name, target)
-		}
-		return set(fmt.Sprintf("checkboxValue(%s)", target))
-	case KindTime:
-		if c.Pointer() {
-			return set(fmt.Sprintf("timeValue(%s)", target))
-		}
-		return set(fmt.Sprintf("timeValue(&%s)", target))
-	default:
-		if c.Pointer() {
-			return fmt.Sprintf("if %s != nil { values[%q] = *%s }", target, c.Name, target)
-		}
-		return set(target)
-	}
+	return c.GoType
 }
 
 // routeSnippetController builds the route registration snippet of a plain

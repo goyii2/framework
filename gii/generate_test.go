@@ -18,8 +18,9 @@ import (
 // testConn opens a file-backed sqlite connection (file-backed so every
 // pooled connection sees the same database) and creates the product table
 // the generator tests run against: the full spread of column kinds —
-// primary key, required and nullable strings, a text column, a decimal, an
-// integer with a default, a boolean, a datetime and the timestamp pair.
+// primary key, a reference column, required and nullable strings, a text
+// column, a decimal, an integer with a default, a boolean, a datetime and
+// the timestamp pair.
 func testConn(t *testing.T) *gorm.DB {
 	t.Helper()
 	conn, err := db.New(db.Config{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "gii.db")})
@@ -31,6 +32,7 @@ func testConn(t *testing.T) *gorm.DB {
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		title VARCHAR(120) NOT NULL,
 		slug VARCHAR(80) NOT NULL,
+		category_id INTEGER NOT NULL,
 		description TEXT,
 		price DECIMAL(10,2) NOT NULL,
 		stock INTEGER NOT NULL DEFAULT 0,
@@ -89,6 +91,15 @@ func assertContains(t *testing.T, content, excerpt, what string) {
 	}
 }
 
+// assertNotContains fails when the excerpt is present — the guard against
+// the scaffolding this migration removed coming back.
+func assertNotContains(t *testing.T, content, excerpt, what string) {
+	t.Helper()
+	if strings.Contains(content, excerpt) {
+		t.Errorf("generated code still carries %s: %q found in:\n%s", what, excerpt, content)
+	}
+}
+
 // assertField checks a struct field maps to its Go type; the whitespace
 // between name and type is gofmt's alignment, never a single literal
 // space.
@@ -123,6 +134,7 @@ func TestGenerateModelMapsColumnsAndRules(t *testing.T) {
 		"ID":          "int",
 		"Title":       "string",
 		"Slug":        "string",
+		"CategoryID":  "int",
 		"Description": "*string",
 		"Price":       "float64",
 		"Stock":       "int",
@@ -136,9 +148,20 @@ func TestGenerateModelMapsColumnsAndRules(t *testing.T) {
 	assertContains(t, source, "`gorm:\"column:id;primaryKey", "the primary key tag")
 	assertContains(t, source, "json:\"published_at\"", "the JSON tag")
 
+	// The `form` tags are the binding whitelist of the editable columns...
+	assertContains(t, source, "form:\"title\"", "the title form tag")
+	assertContains(t, source, "form:\"description\"", "the nullable column form tag")
+	assertContains(t, source, "form:\"published_at\"", "the datetime column form tag")
+	// ...and the server-side columns stay untagged: the key, the reference
+	// (an "_id" suffix), the timestamp pair.
+	for _, column := range []string{"id", "category_id", "created_at", "updated_at"} {
+		assertNotContains(t, source, "form:\""+column+"\"", "the "+column+" form tag")
+	}
+
 	// Rules skeleton: NOT NULL without a default -> Required, varchar
 	// length -> Max; defaulted and numeric columns carry TODO notes; the
-	// unique slug index carries a uniqueness hint.
+	// unique slug index carries a uniqueness hint; the reference column
+	// carries the server-side assignment hint.
 	assertContains(t, source, `"title": z.String().Required(z.Message("title cannot be blank")).Max(120, z.Message("title must be at most 120 characters")),`,
 		"the title rule")
 	assertContains(t, source, `Required(z.Message("slug cannot be blank")).Max(80`, "the slug rule")
@@ -146,6 +169,7 @@ func TestGenerateModelMapsColumnsAndRules(t *testing.T) {
 	assertContains(t, source, "// TODO \"description\": nullable without a length", "the nullable text note")
 	assertContains(t, source, "// TODO \"price\": float column", "the numeric note")
 	assertContains(t, source, "// TODO \"stock\": int column", "the defaulted numeric note")
+	assertContains(t, source, "// TODO \"category_id\": reference column", "the reference column hint")
 }
 
 func TestGenerateModelRefusesMissingTable(t *testing.T) {
@@ -236,43 +260,75 @@ func TestGenerateCrudProducesModelControllerAndViews(t *testing.T) {
 	for _, action := range []string{"ActionList", "ActionNew", "ActionEdit", "ActionSave", "ActionDelete"} {
 		assertContains(t, controller, "func (pc *ProductController) "+action+"(", "the "+action+" action")
 	}
-	// The list goes through the dataprovider convention and renders the
-	// GridView + LinkPager widgets.
+
+	// The listing reads its filters through the form whitelist, narrows the
+	// provider's query through Apply, and keeps the filter values in every
+	// sort and pager link.
 	assertContains(t, controller, "dataprovider.FromRequest(c.Request(), sortableProductFields...)", "the sortable parse")
-	assertContains(t, controller, "dataprovider.ActiveDataProvider[Product]{", "the provider")
-	assertContains(t, controller, "view.GridView{", "the grid widget")
-	assertContains(t, controller, "view.LinkPager{", "the pager widget")
-	// The form is an ActiveForm echoed from the record's values.
-	assertContains(t, controller, "view.ActiveForm{", "the form widget")
-	assertContains(t, controller, "Values: productFormValues(product),", "the form echo")
-	// Input types by column kind: decimal -> number, bool -> checkbox,
-	// datetime -> datetime-local, text -> textarea.
-	assertContains(t, controller, `{Name: "price", Label: "Price", Type: view.FieldNumber, Required: true},`, "the number input")
-	assertContains(t, controller, `{Name: "active", Label: "Active", Type: view.FieldCheckbox},`, "the checkbox input")
-	assertContains(t, controller, `{Name: "published_at", Label: "Published At", Type: view.FieldDatetimeLocal},`, "the datetime input")
-	assertContains(t, controller, `{Name: "description", Label: "Description", Type: view.FieldTextarea},`, "the textarea input")
-	// The grid skips the long text column; the form skips the timestamps.
+	assertContains(t, controller, "form.BindQuery(c.Request(), &filters)", "the query binding")
+	assertContains(t, controller, "web.BadRequest(errs.Error())", "the bind failure answer")
+	assertContains(t, controller, "filters.Apply(ar.New[Product](c.Context()))", "the filtered provider query")
+	assertContains(t, controller, "type productFilters struct {", "the filter struct")
+	assertField(t, controller, "Title", "string")
+	assertContains(t, controller, "form:\"title\"", "the title filter tag")
+	assertField(t, controller, "Stock", "int")
+	assertContains(t, controller, "form:\"stock\"", "the stock filter tag")
+	assertContains(t, controller, "func (f productFilters) Apply(query *ar.Query[Product]) *ar.Query[Product] {", "the filter apply")
+	assertContains(t, controller, `query = query.Where("title LIKE ?"+likeEscapeClause, likePattern(f.Title))`, "the LIKE filter with escape")
+	assertContains(t, controller, `query = query.Where("stock = ?", f.Stock)`, "the equality filter")
+	assertContains(t, controller, `if !f.PublishedAt.IsZero() {`, "the datetime filter guard")
+	assertContains(t, controller, `query = query.Where("published_at = ?", f.PublishedAt)`, "the datetime filter")
+	// The LIKE escape helpers ship with the generated code.
+	assertContains(t, controller, "const likeEscapeClause = ` ESCAPE '\\'`", "the LIKE escape clause")
+	assertContains(t, controller, "var likeEscaper = strings.NewReplacer(`\\`, `\\\\`, `%`, `\\%`, `_`, `\\_`)", "the LIKE escaper")
+	assertContains(t, controller, "func likePattern(raw string) string {", "the LIKE pattern builder")
+	// The keep closure derives the carried filter values from the struct's
+	// form tags, and the grid echoes the filter inputs.
+	assertContains(t, controller, "filterValues := form.Values(&filters)", "the keep derivation")
+	assertContains(t, controller, "keep(q)", "the kept links")
+	assertContains(t, controller, `FilterValues: view.QueryValues(c.Request(), "title", "slug"),`, "the filter echo")
+	assertContains(t, controller, "Filter: &view.ColumnFilter{}", "the filter row input")
+	// The grid skips the long text column; the filter-row inputs render on
+	// the string columns only.
 	if strings.Contains(controller, `{Attr: "description"`) {
 		t.Error("the grid should skip the text column")
 	}
-	if strings.Contains(controller, `{Name: "created_at"`) {
-		t.Error("the form should skip created_at")
+	assertContains(t, controller, `{Attr: "title", Label: "Title", Sortable: true, Value: func(item any) any { return item.(*Product).Title }, Filter: &view.ColumnFilter{}},`,
+		"the title column with its filter input")
+
+	// The write actions bind straight into the record: create binds a zero
+	// record under the insert scenario, update fetches the row first and
+	// overwrites it under the update scenario.
+	assertContains(t, controller, "product := ar.New[Product](c.Context()).New()", "the zero record")
+	assertContains(t, controller, "scenario := validators.ScenarioInsert", "the insert scenario")
+	assertContains(t, controller, "scenario = validators.ScenarioUpdate", "the update scenario")
+	assertContains(t, controller, "product, err = findProduct(c)", "the fetch-before-bind")
+	assertContains(t, controller, "if errs := c.LoadForm(product, scenario); errs != nil {", "the direct binding")
+	// The form is an ActiveForm refilled through form.Values with the
+	// errors straight from the binding and save chain.
+	assertContains(t, controller, "view.ActiveForm{", "the form widget")
+	assertContains(t, controller, "Values: form.Values(product),", "the form refill")
+	assertContains(t, controller, "func renderProductForm(c *web.Context, product *Product, status int, verrs *validators.Errors) error {", "the render signature")
+	// Input types by column kind: decimal -> number, bool -> checkbox,
+	// datetime -> RFC 3339 text, text -> textarea.
+	assertContains(t, controller, `{Name: "price", Label: "Price", Type: view.FieldNumber, Required: true},`, "the number input")
+	assertContains(t, controller, `{Name: "active", Label: "Active", Type: view.FieldCheckbox},`, "the checkbox input")
+	assertContains(t, controller, `{Name: "published_at", Label: "Published At", Type: view.FieldText, Placeholder: "2026-01-02T15:04:05Z"},`, "the datetime text input")
+	assertContains(t, controller, `{Name: "description", Label: "Description", Type: view.FieldTextarea},`, "the textarea input")
+	// The form and the filter struct skip the server-side columns.
+	for _, column := range []string{"id", "category_id", "created_at", "updated_at"} {
+		assertNotContains(t, controller, "form:\""+column+"\"", "the "+column+" binding tag")
+		assertNotContains(t, controller, `{Name: "`+column+`"`, "the "+column+" form input")
 	}
-	// Numeric parsing through the invalid-reporting closure.
-	assertContains(t, controller, `strconv.ParseFloat(in.price, 64)`, "the decimal parse")
-	assertContains(t, controller, `invalid("price", "a number")`, "the parse failure report")
-	// Nullable columns left empty stay NULL; the echo map is keyed by the
-	// column names.
-	assertContains(t, controller, "product.Description = stringPtr(in.description)", "the nullable string apply")
-	assertContains(t, controller, `if in.publishedAt != "" {`, "the nullable datetime guard")
-	assertContains(t, controller, `values["published_at"] = timeValue(product.PublishedAt)`, "the datetime echo")
-	// The helpers the table's columns need — and only those.
-	assertContains(t, controller, "func stringPtr(v string) *string {", "the stringPtr helper")
-	assertContains(t, controller, "func checkboxValue(on bool) string {", "the checkboxValue helper")
-	assertContains(t, controller, "func timeValue(t *time.Time) string {", "the timeValue helper")
-	assertContains(t, controller, "const formTimeLayout = \"2006-01-02T15:04\"", "the form time layout")
-	if strings.Contains(controller, "func boolPtr") {
-		t.Error("boolPtr should not generate without a nullable boolean column")
+
+	// The scaffolding this migration retired stays out: no string-field
+	// input struct, no hand reader, no apply copier, no hand echo map, no
+	// per-type form helpers.
+	for _, gone := range []string{
+		"productFormInput", "readProductForm", "productFormValues", "apply(",
+		"stringPtr", "boolPtr", "checkboxValue", "timeValue", "formTimeLayout", "invalid(",
+	} {
+		assertNotContains(t, controller, gone, "the retired "+gone)
 	}
 
 	views := readGenerated(t, filepath.Join(out, "product_views.templ"))
@@ -337,7 +393,10 @@ func TestGeneratedCrudParsesAllDeclarations(t *testing.T) {
 	model := readGenerated(t, filepath.Join(out, "tag.go"))
 	controller := readGenerated(t, filepath.Join(out, "tag_controller.go"))
 	assertContains(t, model, "type Tag struct {", "the model")
+	assertContains(t, model, "form:\"name\"", "the name binding tag")
+	assertContains(t, model, "form:\"weight\"", "the weight binding tag")
 	assertContains(t, controller, "dataprovider.ActiveDataProvider[Tag]{", "the typed provider")
+	assertContains(t, controller, "type tagFilters struct {", "the filter struct")
 	// No time columns -> no time import, no time helpers.
 	if strings.Contains(controller, "\"time\"") || strings.Contains(controller, "timeValue") {
 		t.Error("time helpers should not generate without time columns")

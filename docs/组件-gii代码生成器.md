@@ -31,7 +31,8 @@ con.AddCommand(giicommands.New(app))
 
 - 字段名 snake_case -> CamelCase（`author_id` -> `AuthorID`）；类型映射 Go 基础类型：整数族 -> `int`/`int64`/…，varchar/text 族 -> `string`，bool -> `bool`，数值小数 -> `float64`，date/datetime/timestamp -> `time.Time`，blob 族 -> `[]byte`。可空列生成指针字段；映射不了的类型落 `string` 并留 TODO 注释。
 - 主键列写 `primaryKey`（检测到自增则追加 `autoIncrement`），并生成 `TableName()`。
-- `Rules()` 骨架按猜测生成：NOT NULL 且无默认值 -> `Required`，varchar 长度 -> `Max`；带默认值/数值/时间列猜不准的留 TODO 空注释；单列唯一索引留唯一性检查提示。`created_at`/`updated_at` 照常生成字段但不进规则。
+- 可编辑列带 `form` tag——写入动作的绑定白名单；主键、`..._id` 引用列、二进制列与 `created_at`/`updated_at` 不打 tag，只由服务端代码赋值。
+- `Rules()` 骨架按猜测生成：NOT NULL 且无默认值 -> `Required`，varchar 长度 -> `Max`；带默认值/数值/时间列猜不准的留 TODO 空注释；单列唯一索引留唯一性检查提示；`..._id` 引用列留「绑定后服务端补值」提示。`created_at`/`updated_at` 照常生成字段但不进规则。
 
 注意：SQLite 把所有整数类型（含迁移的 `BigPrimaryKey`）声明为 `INTEGER`，因此主键在 SQLite 下生成为 `int`。
 
@@ -51,10 +52,10 @@ c.Get("/post/{id:[0-9]+}", ctl.ActionView).Name("post/view")
 
 一次生成三个文件（`<table>.go`、`<table>_controller.go`、`<table>_views.templ`）：
 
-- **list**：`dataprovider.FromRequest` 解析分页/排序（白名单=网格列），`ActiveDataProvider` 取数，`GridView` + `LinkPager` 渲染。
-- **form**（new/edit 共用，save 同时服务创建与更新两个路由）：`ActiveForm` 渲染，422 回显校验消息与已填值；input 类型按列猜：TEXT -> textarea、数值 -> number、bool -> checkbox、date/datetime -> datetime-local、其余 text。
+- **list**：`dataprovider.FromRequest` 解析分页/排序（白名单=网格列）；过滤骨架——filter struct（`form` tag 白名单）经 `form.BindQuery` 读 query，`Apply` 显式组装（字符串列 LIKE+转义、其余列等值，转义辅助随生成物自带），分页/排序链接经 `keep` 闭包携带过滤值（`form.Values` 派生）；`ActiveDataProvider` 取数，`GridView` + `LinkPager` 渲染，字符串网格列带过滤行输入。
+- **form**（new/edit 共用，save 同时服务创建与更新两个路由）：直绑——创建绑定零值记录（insert 场景），更新先查再绑（update 场景，未提交字段保留库值），经 `c.LoadForm` 一步绑定+校验；`ActiveForm` 渲染，回填值经 `form.Values(record)`，错误直接来自 Load/Save 链；input 类型按列猜：TEXT -> textarea、数值 -> number、bool -> checkbox、date/datetime -> RFC 3339 文本输入（占位符展示格式——绑定层的日期时间线上格式是 RFC 3339，datetime-local 控件提交不了）、其余 text。
 - **delete**：POST 删除后回列表。
-- 长文本列（TEXT 族）不进网格，进表单 textarea；`created_at`/`updated_at` 不进表单。
+- 长文本列（TEXT 族）不进网格，进表单 textarea；主键、`..._id` 引用列、二进制列与 `created_at`/`updated_at` 既不进表单也不进过滤。
 - 控制台打印路由注册片段、视图注册片段，并提示运行 `templ generate`——生成器只产出 `.templ` 源码，不执行编译；真实编译依赖你的工程上下文。
 
 ## 模板覆盖

@@ -113,14 +113,29 @@ func TestGenerateCrudAgainstExamplePostTable(t *testing.T) {
 	// columns generate pointer time fields, the timestamps included.
 	assertField(t, model, "CreatedAt", "*time.Time")
 	assertField(t, model, "UpdatedAt", "*time.Time")
+	// The binding whitelist of the example's shape: the editable columns
+	// carry form tags, the key and the author reference stay server-side.
+	for _, column := range []string{"title", "body", "status"} {
+		assertContains(t, model, "form:\""+column+"\"", "the "+column+" binding tag")
+	}
+	for _, column := range []string{"id", "author_id", "created_at", "updated_at"} {
+		if strings.Contains(model, "form:\""+column+"\"") {
+			t.Errorf("the %s column should stay out of the binding whitelist", column)
+		}
+	}
 
 	controller := readGenerated(t, filepath.Join(out, "post_controller.go"))
 	// The bigint primary key goes through the typed FindByID path.
 	assertContains(t, controller, "ar.FindByID[Post](c.Context(), id)", "the typed find")
-	// The bigint author reference parses as an integer input; the text body
+	// The write actions bind straight into the record; the text body
 	// renders as a textarea.
-	assertContains(t, controller, `strconv.ParseInt(in.authorID, 10, 64)`, "the author id parse")
+	assertContains(t, controller, "if errs := c.LoadForm(post, scenario); errs != nil {", "the direct binding")
+	assertContains(t, controller, "Values: form.Values(post),", "the form refill")
 	assertContains(t, controller, `{Name: "body", Label: "Body", Type: view.FieldTextarea},`, "the body textarea")
+	// The listing filter skeleton: the filter struct reads the query and
+	// narrows the provider's query through Apply.
+	assertContains(t, controller, "form.BindQuery(c.Request(), &filters)", "the query binding")
+	assertContains(t, controller, `query = query.Where("title LIKE ?"+likeEscapeClause, likePattern(f.Title))`, "the title LIKE filter")
 
 	views := readGenerated(t, filepath.Join(out, "post_views.templ"))
 	assertContains(t, views, "templ postListPage(d postListData) {", "the list page")

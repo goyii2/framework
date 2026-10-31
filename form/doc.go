@@ -43,6 +43,11 @@
 //	[]string                   time.Time (RFC 3339)
 //	encoding.TextUnmarshaler   any field whose type decodes itself
 //
+// Every supported type also binds through a pointer field (*string, *int,
+// *time.Time, ...), the natural shape of a nullable model column: an
+// arriving value allocates the pointee and binds into it, so the field
+// reads back as a pointer to the submitted value.
+//
 // time.Time parses RFC 3339 text ("2026-10-31T12:30:00+08:00", fractional
 // seconds included). A TextUnmarshaler field receives its value through
 // UnmarshalText, letting models parse custom wire formats without new
@@ -52,8 +57,10 @@
 // A scalar field consumes the first submitted value; a []string field
 // consumes all of them, in order. A lone blank value ("age=") means the
 // input was left unfilled: text fields take the empty text, every other
-// field is treated as not provided and keeps its current value. Judging
-// whether a field may stay blank is the validators' job, not the binder's.
+// field is treated as not provided and keeps its current value — a pointer
+// field keeps its current pointee, nil included, so a blank never turns
+// NULL into a value or a value into NULL. Judging whether a field may stay
+// blank is the validators' job, not the binder's.
 //
 // # JSON values
 //
@@ -111,9 +118,11 @@
 // "true"/"false", []string comma-joined (a nil or empty list renders ""),
 // and a field whose type formats itself through encoding.TextMarshaler
 // renders that text — time.Time renders RFC 3339, fractional seconds
-// preserved so an edit form re-submits the stored instant. A field whose
-// type has no text form — an Unmarshaler without a Marshaler — is left out
-// rather than guessed, and untagged fields never appear.
+// preserved so an edit form re-submits the stored instant. A pointer field
+// renders its pointee the same way, and a nil pointer renders "" — a NULL
+// column's input shows empty. A field whose type has no text form — an
+// Unmarshaler without a Marshaler — is left out rather than guessed, and
+// untagged fields never appear.
 //
 // Wiring a form into an action:
 //

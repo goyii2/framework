@@ -107,7 +107,8 @@ type ActiveForm struct {
 	// Values refills each field, keyed by field Name: after a rejected post
 	// echo the submitted values (r.PostForm's first value per key), when
 	// building an edit form pass the model's current values. Checkbox reads
-	// it as "non-empty means checked"; FieldSelect and FieldRadio mark the
+	// it as "checked" for the values a checkbox submits or a boolean model
+	// refills ("1", "true", "on"); FieldSelect and FieldRadio mark the
 	// option whose Value matches. This is the only refill mechanism — a
 	// field-level Value override deliberately does not exist.
 	Values map[string]string
@@ -166,6 +167,20 @@ func resolveOptions(options []FieldOption, value string) []activeOptionView {
 	return resolved
 }
 
+// isCheckboxOn reports whether an echoed value means a checked checkbox:
+// "1" is what this widget's own checkbox submits back, "true" and "on" the
+// spellings a boolean refill can carry. Everything else — the empty text
+// of an unchecked submission and the "false" of a false boolean — renders
+// unchecked.
+func isCheckboxOn(value string) bool {
+	switch value {
+	case "1", "true", "on":
+		return true
+	default:
+		return false
+	}
+}
+
 func (f ActiveForm) prepared() activeFormView {
 	id := f.ID
 	if id == "" {
@@ -216,9 +231,7 @@ func (f ActiveForm) preparedField(field ActiveField, formID string, errs map[str
 	case FieldSelect, FieldRadio:
 		v.options = resolveOptions(field.Options, value)
 	case FieldCheckbox:
-		// A checkbox submits its value when checked and nothing when not,
-		// so any echoed value means it was checked.
-		v.checked = value != ""
+		v.checked = isCheckboxOn(value)
 	case FieldFile:
 		// A file input cannot carry a value attribute; the browser owns it.
 	default:

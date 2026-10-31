@@ -140,7 +140,7 @@ func TestActiveFormFieldTypes(t *testing.T) {
 		`<textarea id="form-body" class="form-control" name="body" required maxlength="500" placeholder="Tell more">some text</textarea>`,
 		// select marks the option whose Value was submitted
 		`<select id="form-status" class="form-control" name="status" required><option value="1">Active</option><option value="0" selected>Inactive</option></select>`,
-		// checkbox renders checked for a non-empty echoed value
+		// checkbox renders checked for the value it submits back
 		`<input type="checkbox" id="form-agree" name="agree" value="1" checked required>`,
 		// radio marks the matching option, one group name across the inputs
 		`<input type="radio" name="color" value="r">`,
@@ -159,6 +159,34 @@ func TestActiveFormFieldTypes(t *testing.T) {
 	}
 	if strings.Contains(got, "field-owner") {
 		t.Errorf("hidden field wrapped in a group:\n%s", got)
+	}
+}
+
+func TestActiveFormCheckboxRefillStates(t *testing.T) {
+	field := view.ActiveField{Name: "active", Label: "Active", Type: view.FieldCheckbox}
+	cases := []struct {
+		value   string
+		checked bool
+	}{
+		// The value this widget's own checkbox submits back.
+		{"1", true},
+		// The spellings a boolean model refills through form.Values.
+		{"true", true},
+		{"false", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		got := render(t, view.ActiveForm{
+			Fields: []view.ActiveField{field},
+			Values: map[string]string{"active": c.value},
+		}.Render())
+		want := `<input type="checkbox" id="form-active" name="active" value="1"`
+		if c.checked {
+			want += " checked"
+		}
+		if !strings.Contains(got, want+">") {
+			t.Errorf("checkbox refill %q should render checked=%v:\n%s", c.value, c.checked, got)
+		}
 	}
 }
 

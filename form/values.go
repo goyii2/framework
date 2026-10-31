@@ -52,13 +52,26 @@ func Values(model any) map[string]string {
 // field's type has a text form at all.
 func exportString(fv reflect.Value) (string, bool) {
 	// Self-formatting types win over the generic kinds, mirroring how
-	// binding lets TextUnmarshaler fields parse themselves.
-	if m, ok := fv.Interface().(encoding.TextMarshaler); ok {
-		text, err := m.MarshalText()
-		if err != nil {
-			return "", false
+	// binding lets TextUnmarshaler fields parse themselves. The check runs
+	// before the pointer branch so a type whose MarshalText sits on the
+	// pointer receiver still renders through its non-nil pointer; a nil
+	// pointer must skip it (MarshalText would run through nil).
+	if fv.Kind() != reflect.Pointer || !fv.IsNil() {
+		if m, ok := fv.Interface().(encoding.TextMarshaler); ok {
+			text, err := m.MarshalText()
+			if err != nil {
+				return "", false
+			}
+			return string(text), true
 		}
-		return string(text), true
+	}
+	// A pointer field renders its pointee; nil — a NULL column — renders as
+	// the empty text a fresh form input shows.
+	if fv.Kind() == reflect.Pointer {
+		if fv.IsNil() {
+			return "", true
+		}
+		fv = fv.Elem()
 	}
 	switch fv.Kind() {
 	case reflect.String:

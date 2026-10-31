@@ -1,7 +1,12 @@
 // Code generated CRUD over the "{{.ID}}" table; review and adjust freely —
-// the generator does not keep this file in sync. The list action pairs the
-// GridView and LinkPager widgets with the ActiveDataProvider; the form
-// actions render the ActiveForm with the validation messages echoed back.
+// the generator does not keep this file in sync. The write actions bind the
+// submitted values straight into the Active Record — the model's `form`
+// tags are the whitelist, a fresh record for create, the fetched row for
+// update so omitted fields keep their stored values — and validate through
+// the save scenarios. The list action reads its filters from the query
+// string through the same tag mechanism and pairs the GridView and
+// LinkPager widgets with the ActiveDataProvider; the form actions render
+// the ActiveForm with the validation messages echoed back.
 //
 // The generated code addresses the routes by their names ("{{.ID}}/list",
 // ...) and the views by theirs ("{{.ID}}/list", "{{.ID}}/form"); register
@@ -12,6 +17,9 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+{{- if .UsesLike}}
+	"strings"
+{{- end}}
 {{- if .UsesTime}}
 	"time"
 {{- end}}
@@ -21,6 +29,7 @@ import (
 
 	"github.com/goyii2/framework/dataprovider"
 	"github.com/goyii2/framework/db/ar"
+	"github.com/goyii2/framework/form"
 	"github.com/goyii2/framework/url"
 	"github.com/goyii2/framework/validators"
 	"github.com/goyii2/framework/view"
@@ -37,11 +46,51 @@ var sortable{{.Model}}Fields = []string{
 
 // {{.ModelVar}}Columns renders the list's cells, one column per table
 // column; long text columns are left out of the table — add them back here
-// when wanted.
+// when wanted. The string columns carry a filter-row input.
 var {{.ModelVar}}Columns = []view.DataColumn{
 {{- range .GridColumns}}
-	{Attr: "{{.Attr}}", Label: "{{.Label}}", Sortable: true, Value: {{.ValueCode}}},
+	{Attr: "{{.Attr}}", Label: "{{.Label}}", Sortable: true, Value: {{.ValueCode}}{{if .FilterInput}}, Filter: &view.ColumnFilter{}{{end}}},
 {{- end}}
+}
+{{if .UsesLike}}
+// likeEscapeClause is the escape declaration every LIKE of the listing
+// search carries; the pattern builder below escapes with the same character.
+const likeEscapeClause = ` ESCAPE '\'`
+
+// likeEscaper neutralizes the LIKE wildcards (and the escape character
+// itself) in one pass, so each character the user typed keeps its literal
+// meaning inside the pattern and cannot reshape the match.
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
+// likePattern wraps raw input into a contains-match pattern whose interior
+// is fully escaped: "%"/"_" match only themselves, exactly like the rest of
+// the text. Bound as a statement parameter — never concatenated.
+func likePattern(raw string) string {
+	return "%" + likeEscaper.Replace(raw) + "%"
+}
+{{end}}
+// {{.ModelVar}}Filters is the filter state of the listing — a form model
+// read from the query string the GridView filter row submits: string
+// columns match by containment, every other column exactly. The form tags
+// are the reading whitelist; how the filters assemble into SQL stays
+// explicit in Apply.
+type {{.ModelVar}}Filters struct {
+{{- range .FilterFields}}
+	{{.GoName}} {{.Type}} `form:"{{.Name}}"`
+{{- end}}
+}
+
+// Apply narrows the listing query by the filters: the string columns'
+// patterns are fully escaped (no user wildcard reshapes the match), every
+// other column compares exactly, a field left at its zero value meaning
+// "no filter" (a bool field can therefore only narrow to true). All ride
+// the base query so the count, the page fetch and every link stay
+// consistent with them.
+func (f {{.ModelVar}}Filters) Apply(query *ar.Query[{{.Model}}]) *ar.Query[{{.Model}}] {
+{{- range .FilterFields}}
+	{{.Clause}}
+{{- end}}
+	return query
 }
 
 // {{.Controller}} serves the {{.ID}} CRUD pages.
@@ -49,16 +98,25 @@ type {{.Controller}} struct {
 	web.Controller
 }
 
-// ActionList renders the listing: the provider pushes the pagination and
-// the whitelisted sort down to SQL, the GridView and LinkPager widgets
-// render the result.
+// ActionList renders the listing: the filter struct reads the query string
+// through the form whitelist, the provider pushes the pagination and the
+// whitelisted sort down to SQL, and the GridView and LinkPager widgets
+// render the result with the filter values kept around in every link.
 func ({{.Receiver}} *{{.Controller}}) ActionList(c *web.Context) error {
 	params, err := dataprovider.FromRequest(c.Request(), sortable{{.Model}}Fields...)
 	if err != nil {
 		return web.BadRequest(err.Error())
 	}
+	// The filter row reads through the form whitelist — only tagged fields
+	// assign, a query key the struct did not declare is ignored — and a
+	// value that does not parse into its field answers 400 instead of being
+	// silently dropped.
+	var filters {{.ModelVar}}Filters
+	if errs := form.BindQuery(c.Request(), &filters); errs != nil {
+		return web.BadRequest(errs.Error())
+	}
 	res, err := dataprovider.ActiveDataProvider[{{.Model}}]{
-		Query:        ar.New[{{.Model}}](c.Context()),
+		Query:        filters.Apply(ar.New[{{.Model}}](c.Context())),
 		Params:       params,
 		DefaultOrder: []dataprovider.Sort{ {Column: "{{.PK.Column}}", Desc: true} },
 	}.Prepare()
@@ -66,6 +124,19 @@ func ({{.Receiver}} *{{.Controller}}) ActionList(c *web.Context) error {
 		return err
 	}
 
+	// keep returns the query-string parameters that must survive a sort
+	// toggle or a pager click: the filter values the struct carries,
+	// derived from its form tags instead of a hand-copied key list — a
+	// filter field added later rides along automatically.
+	filterValues := form.Values(&filters)
+	keep := func(p url.P) url.P {
+		for name, value := range filterValues {
+			if value != "" {
+				p[name] = value
+			}
+		}
+		return p
+	}
 	// The sort links keep the current page around; the pager keeps the
 	// active sort.
 	query := c.Request().URL.Query()
@@ -79,8 +150,11 @@ func ({{.Receiver}} *{{.Controller}}) ActionList(c *web.Context) error {
 			if page := query.Get("page"); page != "" {
 				q["page"] = page
 			}
-			return url.To("{{.ID}}/list", q)
+			return url.To("{{.ID}}/list", keep(q))
 		},
+{{- if .FilterInputs}}
+		FilterValues: view.QueryValues(c.Request(),{{range .FilterInputs}} "{{.}}",{{end}}),
+{{- end}}
 	}.Render()
 	pager := view.LinkPager{
 		Pagination: res.Pagination(),
@@ -89,7 +163,7 @@ func ({{.Receiver}} *{{.Controller}}) ActionList(c *web.Context) error {
 			if sort := query.Get("sort"); sort != "" {
 				q["sort"] = sort
 			}
-			return url.To("{{.ID}}/list", q)
+			return url.To("{{.ID}}/list", keep(q))
 		},
 	}.Render()
 	return c.Render("{{.ID}}/list", {{.ModelVar}}ListData{
@@ -100,7 +174,8 @@ func ({{.Receiver}} *{{.Controller}}) ActionList(c *web.Context) error {
 	})
 }
 
-// ActionNew renders the create form.
+// ActionNew renders the create form with the refill values of a fresh
+// record.
 func ({{.Receiver}} *{{.Controller}}) ActionNew(c *web.Context) error {
 	return render{{.Model}}Form(c, ar.New[{{.Model}}](c.Context()).New(), http.StatusOK, nil)
 }
@@ -114,27 +189,30 @@ func ({{.Receiver}} *{{.Controller}}) ActionEdit(c *web.Context) error {
 	return render{{.Model}}Form(c, {{.ModelVar}}, http.StatusOK, nil)
 }
 
-// ActionSave receives the form of both routes: without the id path
-// parameter it creates, with one it updates. A rejected submission
-// re-renders the form under 422, the messages and the entered values
-// echoed back.
+// ActionSave receives the form of both routes and binds it straight into
+// the record: without the id path parameter it binds a fresh record under
+// the insert scenario; with one it fetches the row first and overwrites it
+// under the update scenario, so fields the form left out keep their stored
+// values instead of being blanked. A rejected submission re-renders the
+// form under 422, the messages and the entered values echoed back.
 func ({{.Receiver}} *{{.Controller}}) ActionSave(c *web.Context) error {
 	{{.ModelVar}} := ar.New[{{.Model}}](c.Context()).New()
+	scenario := validators.ScenarioInsert
 	if c.Param("{{.PK.Column}}") != "" {
 		var err error
 		{{.ModelVar}}, err = find{{.Model}}(c)
 		if err != nil {
 			return err
 		}
+		scenario = validators.ScenarioUpdate
 	}
-	input := read{{.Model}}Form(c)
-	if fields := input.apply({{.ModelVar}}); len(fields) > 0 {
-		return render{{.Model}}Form(c, {{.ModelVar}}, http.StatusUnprocessableEntity, fields)
+	if errs := c.LoadForm({{.ModelVar}}, scenario); errs != nil {
+		return render{{.Model}}Form(c, {{.ModelVar}}, http.StatusUnprocessableEntity, errs)
 	}
 	if err := {{.ModelVar}}.Save(); err != nil {
 		var verrs *validators.Errors
 		if errors.As(err, &verrs) {
-			return render{{.Model}}Form(c, {{.ModelVar}}, http.StatusUnprocessableEntity, verrs.Fields)
+			return render{{.Model}}Form(c, {{.ModelVar}}, http.StatusUnprocessableEntity, verrs)
 		}
 		return err
 	}
@@ -187,56 +265,24 @@ func find{{.Model}}(c *web.Context) (*{{.Model}}, error) {
 }
 {{- end}}
 
-// {{.ModelVar}}FormInput carries the submitted values, one string field per
-// editable column.
-type {{.ModelVar}}FormInput struct {
-{{- range .FormFields}}
-	{{.GoName}} string
-{{- end}}
-}
-
-// read{{.Model}}Form reads the editable columns from the submitted form.
-func read{{.Model}}Form(c *web.Context) {{.ModelVar}}FormInput {
-	r := c.Request()
-	return {{.ModelVar}}FormInput{
-{{- range .FormFields}}
-		{{.GoName}}: r.PostFormValue("{{.Name}}"),
-{{- end}}
-	}
-}
-
-// apply writes the submitted values into the record.{{if .UsesInvalid}}
-// Values that do not parse produce the field -> messages map (nil when
-// everything parsed);{{end}} nullable columns left empty stay NULL.
-func (in {{.ModelVar}}FormInput) apply({{.ModelVar}} *{{.Model}}) map[string][]string {
-	var fields map[string][]string
-{{- if .UsesInvalid}}
-	invalid := func(name, want string) {
-		if fields == nil {
-			fields = map[string][]string{}
-		}
-		fields[name] = append(fields[name], name+" must be "+want)
-	}
-{{- end}}
-{{- range .FormFields}}
-	{{.ApplyCode}}
-{{- end}}
-	return fields
-}
-
-// {{.ModelVar}}FormFields declares the form's inputs; the input type of
-// each field was picked from the column's database type.
+// {{.ModelVar}}FormFields declares the form's inputs — one per form-tagged
+// column of the model, so every rendered field binds. The input type of
+// each field was picked from the column's database type; datetime columns
+// render as text inputs taking RFC 3339 values (the placeholder shows the
+// shape), the format the binding layer parses.
 var {{.ModelVar}}FormFields = []view.ActiveField{
 {{- range .FormFields}}
-	{Name: "{{.Name}}", Label: "{{.Label}}", Type: {{.InputType}},{{if .Required}} Required: true,{{end}}{{if gt .MaxLength 0}} MaxLength: {{.MaxLength}},{{end}}},
+	{Name: "{{.Name}}", Label: "{{.Label}}", Type: {{.InputType}},{{if .Placeholder}} Placeholder: "{{.Placeholder}}",{{end}}{{if .Required}} Required: true,{{end}}{{if gt .MaxLength 0}} MaxLength: {{.MaxLength}},{{end}}},
 {{- end}}
 }
 
 // render{{.Model}}Form renders the shared create/edit form. Editing picks
 // the heading and targets the record's update route; status is 200 for a
 // fresh form and 422 when a rejected submission re-renders with its
-// messages.
-func render{{.Model}}Form(c *web.Context, {{.ModelVar}} *{{.Model}}, status int, fields map[string][]string) error {
+// messages. The refill values come from form.Values over the record the
+// action holds — a prefilled row or a rejected submission — and the errors
+// arrive straight from the binding and save chain.
+func render{{.Model}}Form(c *web.Context, {{.ModelVar}} *{{.Model}}, status int, verrs *validators.Errors) error {
 	heading := "New {{.ModelVar}}"
 	action := url.To("{{.ID}}/save", nil)
 	deleteURL := ""
@@ -245,30 +291,20 @@ func render{{.Model}}Form(c *web.Context, {{.ModelVar}} *{{.Model}}, status int,
 		action = url.To("{{.ID}}/update", url.P{"{{.PK.Column}}": {{.PK.ValueExpr}}})
 		deleteURL = url.To("{{.ID}}/delete", url.P{"{{.PK.Column}}": {{.PK.ValueExpr}}})
 	}
-	form := view.ActiveForm{
+	formHTML := view.ActiveForm{
 		Action: action,
 		Fields: {{.ModelVar}}FormFields,
-		Errors: &validators.Errors{Fields: fields},
-		Values: {{.ModelVar}}FormValues({{.ModelVar}}),
+		Errors: verrs,
+		Values: form.Values({{.ModelVar}}),
 		CSRF:   c.CsrfToken(),
 	}.Render()
 	return c.RenderStatus(status, "{{.ID}}/form", {{.ModelVar}}FormData{
 		Heading:   heading,
-		Form:      form,
+		Form:      formHTML,
 		CancelURL: url.To("{{.ID}}/list", nil),
 		DeleteURL: deleteURL,
 		CSRF:      c.CsrfToken(),
 	})
-}
-
-// {{.ModelVar}}FormValues fills the form's echo map from the record's
-// current values; nullable columns echo empty when NULL.
-func {{.ModelVar}}FormValues({{.ModelVar}} *{{.Model}}) map[string]string {
-	values := make(map[string]string, {{len .FormFields}})
-{{- range .FormFields}}
-	{{.ValueStmt}}
-{{- end}}
-	return values
 }
 
 // {{.ModelVar}}ListData drives the list view.
@@ -287,47 +323,3 @@ type {{.ModelVar}}FormData struct {
 	DeleteURL string
 	CSRF      string
 }
-{{- if .UsesTimeHelpers}}
-
-// formTimeLayout is the datetime-local format the time fields render into
-// and parse back from.
-const formTimeLayout = "2006-01-02T15:04"
-{{- end}}
-{{- if .UsesStringPtr}}
-
-// stringPtr maps an empty submitted value to nil — the column stays NULL —
-// and any other value to a pointer.
-func stringPtr(v string) *string {
-	if v == "" {
-		return nil
-	}
-	return &v
-}
-{{- end}}
-{{- if .UsesBoolPtr}}
-
-// boolPtr lifts a checkbox verdict into a nullable column.
-func boolPtr(v bool) *bool { return &v }
-{{- end}}
-{{- if .UsesCheckbox}}
-
-// checkboxValue renders a bool for the echo map: empty when off, so the
-// ActiveForm checkbox renders unchecked.
-func checkboxValue(on bool) string {
-	if on {
-		return "1"
-	}
-	return ""
-}
-{{- end}}
-{{- if .UsesTimeHelpers}}
-
-// timeValue renders a time in the form's datetime-local format; nil and
-// zero times render empty.
-func timeValue(t *time.Time) string {
-	if t == nil || t.IsZero() {
-		return ""
-	}
-	return t.Format(formTimeLayout)
-}
-{{- end}}

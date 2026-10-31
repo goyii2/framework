@@ -11,11 +11,15 @@ import (
 	"github.com/goyii2/framework/validators"
 )
 
-// {{.Model}} maps the {{.Table}} table.
+// {{.Model}} maps the {{.Table}} table. The `form` tags mark the columns the
+// write actions bind straight from a request — the tag set is the binding
+// whitelist, so the primary key, reference columns ("..._id"), binary
+// columns and the server-stamped created_at / updated_at stay untagged and
+// writable only by server-side code.
 type {{.Model}} struct {
 	ar.Model
 {{- range .Fields}}
-	{{.Name}} {{.Type}} `gorm:"{{.GormTag}}" json:"{{.Column}}"`{{if .Comment}} // {{.Comment}}{{end}}
+	{{.Name}} {{.Type}} `gorm:"{{.GormTag}}"{{if .FormTag}} form:"{{.FormTag}}"{{end}} json:"{{.Column}}"`{{if .Comment}} // {{.Comment}}{{end}}
 {{- end}}
 }
 

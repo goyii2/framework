@@ -241,7 +241,18 @@ func setJSONField(fv reflect.Value, value any) string {
 	if s, ok := value.(string); ok && s == "" && fv.Kind() != reflect.String {
 		return ""
 	}
+	target, release := nullableTarget(fv)
+	msg := assignJSON(target, value)
+	if msg != "" {
+		release()
+	}
+	return msg
+}
 
+// assignJSON writes one decoded JSON value into the non-pointer field fv and
+// returns "" on success, or the message id describing why the value did not
+// fit.
+func assignJSON(fv reflect.Value, value any) string {
 	// time.Time gets its own message; the generic TextUnmarshaler branch
 	// below would also parse it but report it as an opaque bad value.
 	if fv.Type() == timeType {
@@ -351,6 +362,34 @@ func setField(fv reflect.Value, vals []string) string {
 	if fv.Kind() != reflect.String && len(vals) == 1 && vals[0] == "" {
 		return ""
 	}
+	target, release := nullableTarget(fv)
+	msg := assignText(target, vals)
+	if msg != "" {
+		release()
+	}
+	return msg
+}
+
+// nullableTarget resolves the field a submitted value assigns into: a
+// pointer field — a nullable model column — assigns its pointee, allocated
+// on demand. release undoes the allocation when the value fails to assign,
+// so a parse failure leaves a NULL column NULL instead of a pointer to the
+// zero value. Callers handle the "left unfilled" inputs before this, which
+// keeps a blank or null from allocating at all.
+func nullableTarget(fv reflect.Value) (target reflect.Value, release func()) {
+	if fv.Kind() != reflect.Pointer {
+		return fv, func() {}
+	}
+	if fv.IsNil() {
+		fv.Set(reflect.New(fv.Type().Elem()))
+		return fv.Elem(), func() { fv.Set(reflect.Zero(fv.Type())) }
+	}
+	return fv.Elem(), func() {}
+}
+
+// assignText writes vals into the non-pointer field fv and returns "" on
+// success, or the message id describing why the value did not parse.
+func assignText(fv reflect.Value, vals []string) string {
 	raw := vals[0]
 
 	// time.Time gets its own message; the generic TextUnmarshaler branch
