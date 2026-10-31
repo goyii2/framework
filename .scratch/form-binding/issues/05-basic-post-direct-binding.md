@@ -1,6 +1,6 @@
 # 05: basic 文章 create/update 直绑迁移
 
-Status: ready-for-agent
+Status: claimed
 
 **What to build:** examples/basic 文章创建/编辑改为**直绑**：create 构造零值记录后 `form.Load(ScenarioInsert)`；update **先按 id 查出记录再 `Load(ScenarioUpdate)` 覆写**（未提交字段保留库值，防零值覆盖）；JSON 与 HTML 双路径共用同一表单模型（模型上的 `form` tag 即契约）。中间层 `postPayload`（JSON DTO）与 `postFormInput` / `readPostForm`（HTML 表单读取）淘汰删除；服务端补值的字段（如时间戳）在 Load 之后显式赋值。
 
