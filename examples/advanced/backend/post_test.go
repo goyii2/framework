@@ -69,10 +69,14 @@ func TestBackendPostManagement(t *testing.T) {
 		t.Fatal("the empty listing shows no empty note")
 	}
 
-	// Compose: the form page, then the submission.
+	// Compose: the form page, then the submission. The compose form defaults
+	// the status select to draft.
 	body, status = get(t, admin, srv.URL+"/backend/posts/new")
 	if status != http.StatusOK || !strings.Contains(body, `name="title"`) {
 		t.Fatalf("compose form status = %d", status)
+	}
+	if !strings.Contains(body, `<option value="draft" selected>`) {
+		t.Error("the compose form does not default the status select to draft")
 	}
 	match := csrfField.FindStringSubmatch(body)
 	if match == nil {
@@ -80,11 +84,16 @@ func TestBackendPostManagement(t *testing.T) {
 	}
 	token := match[1]
 
+	// The id and author_id fields ride along uninvited: neither column is in
+	// the model's binding whitelist, so both must assign nothing — the row
+	// keeps its own id and the signed-in admin as its author.
 	_, status, location := postForm(t, admin, srv.URL+"/backend/posts", url.Values{
-		"_csrf":  {token},
-		"title":  {"First managed post"},
-		"status": {"published"},
-		"body":   {"Written from the backend."},
+		"_csrf":     {token},
+		"title":     {"First managed post"},
+		"status":    {"published"},
+		"body":      {"Written from the backend."},
+		"id":        {"999"},
+		"author_id": {"2"},
 	})
 	if status != http.StatusFound || location != "/backend/posts" {
 		t.Fatalf("compose status = %d location = %q, want 302 /backend/posts", status, location)
@@ -92,10 +101,19 @@ func TestBackendPostManagement(t *testing.T) {
 
 	// The listing shows the row, and its View action points into the
 	// frontend's public page — the cross-partition address the named route
-	// built.
+	// built. The submitted id and author_id assigned nothing: the row kept
+	// its own id, and the author is the signed-in admin the server assigned.
 	created, err := ar.New[models.Post](ctx).Where("title = ?", "First managed post").One()
 	if err != nil {
 		t.Fatalf("loading the created post: %v", err)
+	}
+	if created.ID == 999 {
+		t.Error("a submitted id assigned the record's primary key")
+	}
+	// admin is the first seeded account (id 1) and demo the second, so a
+	// whitelisted bind must have kept the server-assigned author reference.
+	if created.AuthorID != 1 {
+		t.Errorf("a submitted author_id overrode the server-assigned author: author_id = %d", created.AuthorID)
 	}
 	viewURL := "/posts/" + strconv.FormatInt(created.ID, 10)
 	body, status = get(t, admin, srv.URL+"/backend/posts")
@@ -189,5 +207,56 @@ func TestBackendPostValidationEchoesWithoutPersisting(t *testing.T) {
 	}
 	if n != 0 {
 		t.Errorf("post count after a rejected save = %d, want 0", n)
+	}
+}
+
+// A save whose form left the body field out keeps the stored body: the
+// record is fetched first and only the submitted fields overwrite it, so an
+// omitted column is never blanked by the binding.
+func TestBackendPostSaveOmittedFieldKeepsStoredValue(t *testing.T) {
+	h, app := newBackendHandler(t)
+	admin, srv := newBrowser(t, h)
+	login(t, admin, srv.URL, "admin", "admin123")
+
+	body, _ := get(t, admin, srv.URL+"/backend/posts/new")
+	match := csrfField.FindStringSubmatch(body)
+	if match == nil {
+		t.Fatal("compose form carries no CSRF field")
+	}
+	_, status, location := postForm(t, admin, srv.URL+"/backend/posts", url.Values{
+		"_csrf":  {match[1]},
+		"title":  {"Omitted body source"},
+		"status": {"published"},
+		"body":   {"The stored body the next save must keep."},
+	})
+	if status != http.StatusFound || location != "/backend/posts" {
+		t.Fatalf("compose status = %d location = %q, want 302 /backend/posts", status, location)
+	}
+
+	ctx := app.WithContext(context.Background())
+	created, err := ar.New[models.Post](ctx).Where("title = ?", "Omitted body source").One()
+	if err != nil {
+		t.Fatalf("loading the created post: %v", err)
+	}
+
+	// The save carries title and status only: the body column keeps the
+	// row's stored text instead of blanking to the empty string.
+	_, status, location = postForm(t, admin, srv.URL+"/backend/posts/"+strconv.FormatInt(created.ID, 10), url.Values{
+		"_csrf":  {match[1]},
+		"title":  {"Renamed without body"},
+		"status": {"draft"},
+	})
+	if status != http.StatusFound || location != "/backend/posts" {
+		t.Fatalf("save status = %d location = %q, want 302 /backend/posts", status, location)
+	}
+	saved, err := ar.New[models.Post](ctx).Where("id = ?", created.ID).One()
+	if err != nil {
+		t.Fatalf("reloading the post: %v", err)
+	}
+	if saved.Title != "Renamed without body" || saved.Status != models.PostStatusDraft {
+		t.Errorf("the save did not apply the submitted fields: title = %q status = %q", saved.Title, saved.Status)
+	}
+	if saved.Body != "The stored body the next save must keep." {
+		t.Errorf("the omitted body was overwritten: %q", saved.Body)
 	}
 }

@@ -14,15 +14,18 @@ import (
 // reference to the account that wrote it; the Author association
 // eager-loads that row with With("Author"). Status carries the publishing
 // workflow — the frontend shows the published posts only, so drafts stay
-// backend-visible alone. The embedded Hooks dispatcher fans GORM lifecycle
-// events out to the Timestamp behavior, which stamps created_at /
-// updated_at on every save.
+// backend-visible alone. The `form` tags whitelist what a submitted form or
+// JSON body may assign on direct binding: the editable text columns only —
+// the primary key, the author reference and the association stay
+// server-assigned, and the Timestamp behavior owns created_at / updated_at.
+// The embedded Hooks dispatcher fans GORM lifecycle events out to the
+// Timestamp behavior, which stamps created_at / updated_at on every save.
 type Post struct {
 	ar.Model
 	ID       int64  `gorm:"column:id;primaryKey" json:"id"`
-	Title    string `gorm:"column:title" json:"title"`
-	Body     string `gorm:"column:body" json:"body"`
-	Status   string `gorm:"column:status" json:"status"`
+	Title    string `gorm:"column:title" form:"title" json:"title"`
+	Body     string `gorm:"column:body" form:"body" json:"body"`
+	Status   string `gorm:"column:status" form:"status" json:"status"`
 	AuthorID int64  `gorm:"column:author_id" json:"author_id"`
 	Author   *User  `gorm:"foreignKey:AuthorID" json:"author,omitempty"`
 
