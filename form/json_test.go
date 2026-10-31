@@ -281,3 +281,41 @@ func TestMalformedJSONBodyReportsRootError(t *testing.T) {
 		}
 	}
 }
+
+func TestJSONEmptyBodyBindsNothing(t *testing.T) {
+	// An empty body — no bytes or whitespace only — is a valid binding that
+	// submits no values, the JSON counterpart of an empty form body; an
+	// empty object likewise submits no values.
+	for name, body := range map[string]string{
+		"empty":        "",
+		"whitespace":   " \n\t ",
+		"empty object": "{}",
+	} {
+		f := stringsForm{Login: "kept"}
+		if errs := Bind(jsonRequest(body), &f); errs != nil {
+			t.Fatalf("Bind(%s body) = %v, want nil", name, errs)
+		}
+		if f.Login != "kept" {
+			t.Errorf("Login(%s body) = %q, want the current value kept", name, f.Login)
+		}
+	}
+}
+
+func TestBindWithoutContentTypeBindsNothing(t *testing.T) {
+	// A request that declares no content type — or an unparsable one —
+	// declares no body source: nothing binds and nothing fails. Only bodies
+	// explicitly declaring a supported type are routed to a source.
+	for _, contentType := range []string{"", "not a type"} {
+		req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader("login=ada"))
+		if contentType != "" {
+			req.Header.Set("Content-Type", contentType)
+		}
+		f := stringsForm{}
+		if errs := Bind(req, &f); errs != nil {
+			t.Fatalf("Bind(%q content type) = %v, want nil", contentType, errs)
+		}
+		if f.Login != "" {
+			t.Errorf("Login = %q with %q content type, want the zero value", f.Login, contentType)
+		}
+	}
+}

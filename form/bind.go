@@ -1,10 +1,12 @@
 package form
 
 import (
+	"bytes"
 	"context"
 	"encoding"
 	"encoding/json"
 	"fmt"
+	"io"
 	"mime"
 	"net/http"
 	"net/url"
@@ -75,11 +77,19 @@ func BindQuery(r *http.Request, dst any) *validators.Errors {
 // that map through the same tag whitelist as the form source: never decoding
 // the body straight into the model, so no JSON key can ever reach a field the
 // model did not declare — encoding/json's case-insensitive field matching is
-// precisely the over-posting hole this detour closes. A body that is not one
-// JSON object is reported under the record-level $root key.
+// precisely the over-posting hole this detour closes. An empty body submits
+// no values, exactly like an empty form body; a body that is not one JSON
+// object is reported under the record-level $root key.
 func bindJSONBody(r *http.Request, dst any) *validators.Errors {
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		return rootBodyError(r.Context(), msgJSONBody)
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return nil
+	}
 	var payload map[string]any
-	dec := json.NewDecoder(r.Body)
+	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
 	if err := dec.Decode(&payload); err != nil {
 		return rootBodyError(r.Context(), msgJSONBody)
