@@ -16,7 +16,8 @@ func translatedFixture() *i18n.MessageSource {
 	return i18n.NewMessageSource(fstest.MapFS{
 		"zh-CN/app.json": &fstest.MapFile{Data: []byte(`{
 			"not a valid integer": "不是有效整数",
-			"not a valid date-time": "不是有效日期时间"
+			"not a valid date-time": "不是有效日期时间",
+			"malformed JSON body": "JSON 请求体格式错误"
 		}`)},
 	})
 }
@@ -84,5 +85,33 @@ func TestQueryTypeErrorsAreTranslated(t *testing.T) {
 	}
 	if got := errs.Fields["age"]; len(got) != 1 || got[0] != "不是有效整数" {
 		t.Errorf(`Fields["age"] = %q, want the translated message`, got)
+	}
+}
+
+// TestJSONTypeErrorsAreTranslated: the JSON source runs the same translation
+// path as the form source.
+func TestJSONTypeErrorsAreTranslated(t *testing.T) {
+	req := jsonRequest(`{"age": "abc"}`).WithContext(translatedCtx("zh-CN"))
+	f := allTypes{}
+	errs := Bind(req, &f)
+	if errs == nil {
+		t.Fatal("Bind = nil, want field errors")
+	}
+	if got := errs.Fields["age"]; len(got) != 1 || got[0] != "不是有效整数" {
+		t.Errorf(`Fields["age"] = %q, want the translated message`, got)
+	}
+}
+
+// TestMalformedJSONBodyIsTranslated: the record-level body message is an id on
+// the same translation path as field messages.
+func TestMalformedJSONBodyIsTranslated(t *testing.T) {
+	req := jsonRequest(`{"age": `).WithContext(translatedCtx("zh-CN"))
+	f := allTypes{}
+	errs := Bind(req, &f)
+	if errs == nil {
+		t.Fatal("Bind = nil, want a root error")
+	}
+	if got := errs.Fields["$root"]; len(got) != 1 || got[0] != "JSON 请求体格式错误" {
+		t.Errorf(`Fields["$root"] = %q, want the translated message`, got)
 	}
 }

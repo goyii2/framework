@@ -57,9 +57,7 @@ func Bind(r *http.Request, dst any) *validators.Errors {
 		return bindJSONBody(r, dst)
 	case "application/x-www-form-urlencoded":
 		if err := r.ParseForm(); err != nil {
-			fields := map[string][]string{"$root": {msgBody}}
-			translateMessages(r.Context(), fields)
-			return &validators.Errors{Scenario: ScenarioBind, Fields: fields}
+			return rootBodyError(r.Context(), msgBody)
 		}
 		return bindValues(r.Context(), r.PostForm, dst)
 	default:
@@ -108,49 +106,53 @@ func rootBodyError(ctx context.Context, msg string) *validators.Errors {
 	return &validators.Errors{Scenario: ScenarioBind, Fields: fields}
 }
 
-// bindJSONValues is the JSON-source assignment core: every exported field
-// carrying a form tag whose exact key appears in the payload gets the value
-// converted into it, and the messages of values that failed to convert are
-// collected per key.
+// bindJSONValues assigns from the decoded JSON payload: every tagged field
+// whose exact key appears in the payload gets its value converted in, and the
+// messages of values that failed to convert are collected per key.
 func bindJSONValues(ctx context.Context, payload map[string]any, dst any) *validators.Errors {
-	v := reflect.ValueOf(dst)
-	if v.Kind() != reflect.Pointer || v.IsNil() {
-		panic("form: destination must be a non-nil pointer to a struct")
-	}
-	v = v.Elem()
-	if v.Kind() != reflect.Struct {
-		panic("form: destination must be a non-nil pointer to a struct")
-	}
-	fields := map[string][]string{}
-	t := v.Type()
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-		if !field.IsExported() {
-			continue
-		}
-		name := field.Tag.Get("form")
-		if name == "" || name == "-" {
-			continue
-		}
+	b := newBinder(ctx, dst)
+	b.eachTagged(func(name string, fv reflect.Value) {
 		value, ok := payload[name]
 		if !ok {
-			continue
+			return
 		}
-		if msg := setJSONField(v.Field(i), value); msg != "" {
-			fields[name] = append(fields[name], msg)
+		if msg := setJSONField(fv, value); msg != "" {
+			b.fail(name, msg)
 		}
-	}
-	if len(fields) == 0 {
-		return nil
-	}
-	translateMessages(ctx, fields)
-	return &validators.Errors{Scenario: ScenarioBind, Fields: fields}
+	})
+	return b.errs()
 }
 
-// bindValues is the shared assignment core: every exported field carrying a
-// form tag whose key appears in values gets the value parsed into it, and the
-// messages of values that failed to parse are collected per key.
+// bindValues assigns from form pairs: every tagged field whose key appears in
+// values gets its value(s) parsed in, and the messages of values that failed
+// to parse are collected per key.
 func bindValues(ctx context.Context, values url.Values, dst any) *validators.Errors {
+	b := newBinder(ctx, dst)
+	b.eachTagged(func(name string, fv reflect.Value) {
+		vals, ok := values[name]
+		if !ok || len(vals) == 0 {
+			return
+		}
+		if msg := setField(fv, vals); msg != "" {
+			b.fail(name, msg)
+		}
+	})
+	return b.errs()
+}
+
+// binder walks a destination's tagged fields and collects the per-key parse
+// messages of values that failed to assign. Every source runs through it, so
+// the whitelist walk and the error shape are identical wherever a value came
+// from.
+type binder struct {
+	ctx    context.Context
+	model  reflect.Value
+	fields map[string][]string
+}
+
+// newBinder validates the destination — a non-nil pointer to a struct — and
+// returns the walker over its tag-whitelisted fields.
+func newBinder(ctx context.Context, dst any) *binder {
 	v := reflect.ValueOf(dst)
 	if v.Kind() != reflect.Pointer || v.IsNil() {
 		panic("form: destination must be a non-nil pointer to a struct")
@@ -159,8 +161,13 @@ func bindValues(ctx context.Context, values url.Values, dst any) *validators.Err
 	if v.Kind() != reflect.Struct {
 		panic("form: destination must be a non-nil pointer to a struct")
 	}
-	fields := map[string][]string{}
-	t := v.Type()
+	return &binder{ctx: ctx, model: v, fields: map[string][]string{}}
+}
+
+// eachTagged visits every exported field that opted into binding with a form
+// tag, handing the visitor the tag name and the addressable field.
+func (b *binder) eachTagged(visit func(name string, fv reflect.Value)) {
+	t := b.model.Type()
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
 		if !field.IsExported() {
@@ -170,19 +177,23 @@ func bindValues(ctx context.Context, values url.Values, dst any) *validators.Err
 		if name == "" || name == "-" {
 			continue
 		}
-		vals, ok := values[name]
-		if !ok || len(vals) == 0 {
-			continue
-		}
-		if msg := setField(v.Field(i), vals); msg != "" {
-			fields[name] = append(fields[name], msg)
-		}
+		visit(name, b.model.Field(i))
 	}
-	if len(fields) == 0 {
+}
+
+// fail records a parse message under the key that failed.
+func (b *binder) fail(name, msg string) {
+	b.fields[name] = append(b.fields[name], msg)
+}
+
+// errs translates whatever messages collected and returns the validators
+// failure, or nil when every value parsed.
+func (b *binder) errs() *validators.Errors {
+	if len(b.fields) == 0 {
 		return nil
 	}
-	translateMessages(ctx, fields)
-	return &validators.Errors{Scenario: ScenarioBind, Fields: fields}
+	translateMessages(b.ctx, b.fields)
+	return &validators.Errors{Scenario: ScenarioBind, Fields: b.fields}
 }
 
 // translateMessages runs every field message through the i18n lookup for the
