@@ -195,6 +195,13 @@ func setJSONField(fv reflect.Value, value any) string {
 	if value == nil {
 		return ""
 	}
+	// A JSON empty string sent to a field that does not hold text reads as
+	// "the input was left unfilled" — the form source's verdict on a lone
+	// blank value — so the field keeps its current value; text fields take
+	// the empty text below.
+	if s, ok := value.(string); ok && s == "" && fv.Kind() != reflect.String {
+		return ""
+	}
 
 	// time.Time gets its own message; the generic TextUnmarshaler branch
 	// below would also parse it but report it as an opaque bad value.

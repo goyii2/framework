@@ -210,3 +210,46 @@ func TestJSONArraysOfNonStringsAndNestedObjectsFailPerField(t *testing.T) {
 		t.Errorf("Age = %d, want the zero value", f.Age)
 	}
 }
+
+func TestJSONEmptyTextAndNullMeanUnfilled(t *testing.T) {
+	// A JSON empty string sent to a non-text field reads as "the input was
+	// left unfilled" — the same verdict the form source gives a blank value —
+	// so the field keeps its current value and nothing reports a failure.
+	// null means the same: no value arrived. Whether a field may stay blank
+	// stays the validators' verdict, not the binder's.
+	body := `{
+		"name": "",
+		"age": "",
+		"price": "",
+		"active": "",
+		"tags": "",
+		"created": "",
+		"role": "",
+		"count": null
+	}`
+	f := allTypes{Age: 3, Active: true, Count: 9}
+	if errs := Bind(jsonRequest(body), &f); errs != nil {
+		t.Fatalf("Bind(blank inputs) = %v, want nil", errs)
+	}
+	if f.Name != "" {
+		t.Errorf("Name = %q, want the empty text assigned", f.Name)
+	}
+	if f.Age != 3 {
+		t.Errorf("Age = %d, want 3 kept: an empty string is not provided", f.Age)
+	}
+	if !f.Active {
+		t.Error("Active = false, want true kept: an empty string is not provided")
+	}
+	if f.Count != 9 {
+		t.Errorf("Count = %d, want 9 kept: null is not provided", f.Count)
+	}
+	if f.Tags != nil {
+		t.Errorf("Tags = %q, want no assignment", f.Tags)
+	}
+	if !f.Created.IsZero() {
+		t.Errorf("Created = %v, want the zero value", f.Created)
+	}
+	if f.Role.Name != "" {
+		t.Errorf("Role.Name = %q, want the zero value", f.Role.Name)
+	}
+}
