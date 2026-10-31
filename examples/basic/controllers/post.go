@@ -8,7 +8,6 @@ package controllers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -24,6 +23,7 @@ import (
 	"github.com/goyii2/framework/db/ar"
 	"github.com/goyii2/framework/examples/basic/models"
 	"github.com/goyii2/framework/examples/basic/views"
+	"github.com/goyii2/framework/form"
 	"github.com/goyii2/framework/i18n"
 	"github.com/goyii2/framework/url"
 	"github.com/goyii2/framework/validators"
@@ -115,27 +115,22 @@ func (pc *PostController) ActionView(c *web.Context) error {
 	return c.JSON(post)
 }
 
-// postPayload is the request body of the write actions.
-type postPayload struct {
-	Title  string `json:"title"`
-	Body   string `json:"body"`
-	Status string `json:"status"`
-}
-
-// ActionCreate inserts a post. Save runs the insert scenario first: a body
+// ActionCreate inserts a post. The submitted values bind straight into the
+// zero record — the model's form tags are the whitelist, so a JSON key or
+// form field the record did not declare (an id, an author reference) assigns
+// nothing — and LoadForm runs the insert scenario before any write: a body
 // the rules reject never reaches the database and comes back as 422 with the
-// field -> messages map.
+// field -> messages map. The author reference is server-side state, set
+// after the binding so a submission can never carry it.
 func (pc *PostController) ActionCreate(c *web.Context) error {
-	var payload postPayload
-	if err := json.NewDecoder(c.Request().Body).Decode(&payload); err != nil {
-		return web.BadRequest("malformed JSON body")
-	}
 	author, ok := c.User().Identity().(*models.User)
 	if !ok || author == nil {
 		return web.Unauthorized("authentication required")
 	}
 	post := ar.New[models.Post](c.Context()).New()
-	post.Title, post.Body, post.Status = payload.Title, payload.Body, payload.Status
+	if errs := c.LoadForm(post, validators.ScenarioInsert); errs != nil {
+		return c.JSONStatus(http.StatusUnprocessableEntity, errs.Fields)
+	}
 	post.AuthorID = author.ID
 	if err := post.Save(); err != nil {
 		var verrs *validators.Errors
@@ -149,8 +144,11 @@ func (pc *PostController) ActionCreate(c *web.Context) error {
 	return c.JSONStatus(http.StatusCreated, post)
 }
 
-// ActionUpdate rewrites a post. The update scenario validates the payload;
-// a row that vanished between read and write answers 404.
+// ActionUpdate rewrites a post. The row is fetched first and the submitted
+// values overwrite it under the update scenario, so a submission that leaves
+// a field out keeps the stored value instead of blanking it — the fetch,
+// bind, save order is what protects columns the request never carried. A
+// row that vanished between read and write answers 404.
 func (pc *PostController) ActionUpdate(c *web.Context) error {
 	id, err := c.ParamInt("id")
 	if err != nil {
@@ -163,11 +161,9 @@ func (pc *PostController) ActionUpdate(c *web.Context) error {
 	if err != nil {
 		return err
 	}
-	var payload postPayload
-	if err := json.NewDecoder(c.Request().Body).Decode(&payload); err != nil {
-		return web.BadRequest("malformed JSON body")
+	if errs := c.LoadForm(post, validators.ScenarioUpdate); errs != nil {
+		return c.JSONStatus(http.StatusUnprocessableEntity, errs.Fields)
 	}
-	post.Title, post.Body, post.Status = payload.Title, payload.Body, payload.Status
 	if err := post.Save(); err != nil {
 		var verrs *validators.Errors
 		if errors.As(err, &verrs) {
@@ -474,18 +470,22 @@ func (pc *PostController) ActionShow(c *web.Context) error {
 }
 
 // ActionNew renders the create form; guests go to the login page, accounts
-// without post/create see the 403 page.
+// without post/create see the 403 page. The refill values come from a fresh
+// record — the status select defaults to draft.
 func (pc *PostController) ActionNew(c *web.Context) error {
 	if err := requirePermission(c, "post/create"); err != nil {
 		return err
 	}
-	return renderPostForm(c, false, http.StatusOK, postFormInput{status: models.PostStatusDraft}, nil)
+	post := ar.New[models.Post](c.Context()).New()
+	post.Status = models.PostStatusDraft
+	return renderPostForm(c, false, http.StatusOK, form.Values(post), nil)
 }
 
 // ActionStore receives the create form. The CSRF middleware verified the
-// submission; the save pipeline runs the insert scenario and a rejected
-// payload re-renders the form under 422 with the messages and the entered
-// values echoed back.
+// submission; the field values bind straight into the zero record and
+// LoadForm runs the insert scenario, so a rejected payload re-renders the
+// form under 422 with the messages and the entered values echoed back. The
+// author reference is server-side state, set after the binding.
 func (pc *PostController) ActionStore(c *web.Context) error {
 	if err := requirePermission(c, "post/create"); err != nil {
 		return err
@@ -494,12 +494,13 @@ func (pc *PostController) ActionStore(c *web.Context) error {
 	if !ok || author == nil {
 		return web.Unauthorized("authentication required")
 	}
-	input := readPostForm(c)
 	post := ar.New[models.Post](c.Context()).New()
-	post.Title, post.Body, post.Status = input.title, input.body, input.status
+	if errs := c.LoadForm(post, validators.ScenarioInsert); errs != nil {
+		return replayPostForm(c, false, form.Values(post), errs)
+	}
 	post.AuthorID = author.ID
 	if err := post.Save(); err != nil {
-		return replayPostForm(c, false, input, err)
+		return replayPostForm(c, false, form.Values(post), err)
 	}
 	return c.Redirect(http.StatusFound, url.To("post/show", url.P{"id": postID(post)}))
 }
@@ -513,12 +514,13 @@ func (pc *PostController) ActionEdit(c *web.Context) error {
 	if err != nil {
 		return err
 	}
-	return renderPostForm(c, true, http.StatusOK, postFormInput{title: post.Title, body: post.Body, status: post.Status}, nil)
+	return renderPostForm(c, true, http.StatusOK, form.Values(post), nil)
 }
 
-// ActionSave receives the update form; like the create form it re-renders
-// with 422 and the entered values when the update scenario rejects the
-// payload.
+// ActionSave receives the update form: the record is fetched first and the
+// submission overwrites it under the update scenario, so fields the form
+// left out keep their stored values. A rejected payload re-renders with 422
+// and the entered values.
 func (pc *PostController) ActionSave(c *web.Context) error {
 	if err := requirePermission(c, "post/update"); err != nil {
 		return err
@@ -527,10 +529,11 @@ func (pc *PostController) ActionSave(c *web.Context) error {
 	if err != nil {
 		return err
 	}
-	input := readPostForm(c)
-	post.Title, post.Body, post.Status = input.title, input.body, input.status
+	if errs := c.LoadForm(post, validators.ScenarioUpdate); errs != nil {
+		return replayPostForm(c, true, form.Values(post), errs)
+	}
 	if err := post.Save(); err != nil {
-		return replayPostForm(c, true, input, err)
+		return replayPostForm(c, true, form.Values(post), err)
 	}
 	return c.Redirect(http.StatusFound, url.To("post/show", url.P{"id": postID(post)}))
 }
@@ -551,31 +554,15 @@ func (pc *PostController) ActionDestroy(c *web.Context) error {
 	return c.Redirect(http.StatusFound, url.To("post/list", nil))
 }
 
-// postFormInput carries the form field values between reading, saving and
-// re-rendering.
-type postFormInput struct {
-	title  string
-	body   string
-	status string
-}
-
-// readPostForm reads the submitted form fields.
-func readPostForm(c *web.Context) postFormInput {
-	r := c.Request()
-	return postFormInput{
-		title:  r.PostFormValue("title"),
-		body:   r.PostFormValue("body"),
-		status: r.PostFormValue("status"),
-	}
-}
-
 // renderPostForm renders the shared form for create and edit; editing picks
 // the heading and targets the row's save route instead of the create route.
 // status is 200 for a fresh form and 422 when a rejected submission
-// re-renders with its messages. The ActiveForm widget does the field
-// rendering: labels, controls, and — on a 422 — the validators messages
-// under the failing fields with the submitted values refilled.
-func renderPostForm(c *web.Context, editing bool, status int, input postFormInput, verrs *validators.Errors) error {
+// re-renders with its messages. values is the refill map the ActiveForm
+// echoes back — form.Values over the record the action holds, whether a
+// prefilled row or a rejected submission. The ActiveForm widget does the
+// field rendering: labels, controls, and — on a 422 — the validators
+// messages under the failing fields.
+func renderPostForm(c *web.Context, editing bool, status int, values map[string]string, verrs *validators.Errors) error {
 	ctx := c.Context()
 	t := func(msgID string) string { return i18n.T(ctx, "app", msgID, nil) }
 	heading := t("New post")
@@ -596,12 +583,8 @@ func renderPostForm(c *web.Context, editing bool, status int, input postFormInpu
 			{Name: "body", Label: t("Body"), Type: view.FieldTextarea},
 		},
 		Errors: verrs,
-		Values: map[string]string{
-			"title":  input.title,
-			"status": input.status,
-			"body":   input.body,
-		},
-		CSRF: c.CsrfToken(),
+		Values: values,
+		CSRF:   c.CsrfToken(),
 	}
 	c.SetTitle(heading)
 	return c.RenderStatus(status, "post/form", views.PostFormData{
@@ -612,13 +595,13 @@ func renderPostForm(c *web.Context, editing bool, status int, input postFormInpu
 	})
 }
 
-// replayPostForm re-renders the form after a rejected save: validation
-// failures come back as the 422 error set (messages already translated by
-// the save pipeline's flatten boundary), anything else is a real error.
-func replayPostForm(c *web.Context, editing bool, input postFormInput, err error) error {
+// replayPostForm re-renders the form after a rejected submission: the
+// failure arrives as the validators error set (messages already translated
+// by the binding or save pipeline), anything else is a real error.
+func replayPostForm(c *web.Context, editing bool, values map[string]string, err error) error {
 	var verrs *validators.Errors
 	if !errors.As(err, &verrs) {
 		return err
 	}
-	return renderPostForm(c, editing, http.StatusUnprocessableEntity, input, verrs)
+	return renderPostForm(c, editing, http.StatusUnprocessableEntity, values, verrs)
 }

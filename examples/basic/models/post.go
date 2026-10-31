@@ -15,12 +15,16 @@ import (
 // The embedded Hooks dispatcher fans GORM lifecycle events out to the
 // Timestamp behavior, which stamps created_at / updated_at on save — the
 // behaviors a Yii2 model would attach, expressed as struct embedding.
+// The `form` tags on the editable columns are the binding whitelist: the
+// write actions bind request values straight into the record, so the
+// primary key, the author reference and the association stay writable only
+// by server-side code.
 type Post struct {
 	ar.Model
 	ID       int64  `gorm:"column:id;primaryKey" json:"id"`
-	Title    string `gorm:"column:title" json:"title"`
-	Body     string `gorm:"column:body" json:"body"`
-	Status   string `gorm:"column:status" json:"status"`
+	Title    string `gorm:"column:title" form:"title" json:"title"`
+	Body     string `gorm:"column:body" form:"body" json:"body"`
+	Status   string `gorm:"column:status" form:"status" json:"status"`
 	AuthorID int64  `gorm:"column:author_id" json:"author_id"`
 	Author   *User  `gorm:"foreignKey:AuthorID" json:"author,omitempty"`
 
