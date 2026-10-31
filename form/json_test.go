@@ -253,3 +253,31 @@ func TestJSONEmptyTextAndNullMeanUnfilled(t *testing.T) {
 		t.Errorf("Role.Name = %q, want the zero value", f.Role.Name)
 	}
 }
+
+func TestMalformedJSONBodyReportsRootError(t *testing.T) {
+	// A body that is not one JSON object — truncated text, a non-object
+	// value, trailing garbage after a complete object — is a whole-request
+	// failure, not a field failure: it lands under the record-level $root
+	// key the validators package uses for record-wide issues.
+	for name, body := range map[string]string{
+		"truncated":     `{"login": "ada"`,
+		"non-object":    `["login", "ada"]`,
+		"trailing-junk": `{"login": "ada"} oops`,
+		"two values":    `{"login": "ada"}{"login": "bob"}`,
+	} {
+		f := stringsForm{}
+		errs := Bind(jsonRequest(body), &f)
+		if errs == nil {
+			t.Fatalf("Bind(%s) = nil, want a root error", name)
+		}
+		if errs.Scenario != ScenarioBind {
+			t.Errorf("Scenario(%s) = %q, want %q", name, errs.Scenario, ScenarioBind)
+		}
+		if got := errs.Fields["$root"]; len(got) != 1 || got[0] != "malformed JSON body" {
+			t.Errorf("Fields[$root](%s) = %q, want the JSON body message", name, got)
+		}
+		if f.Login != "" {
+			t.Errorf("Login(%s) = %q, want the zero value: nothing binds from a broken body", name, f.Login)
+		}
+	}
+}

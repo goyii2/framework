@@ -30,6 +30,7 @@ const (
 	msgDateTime = "not a valid date-time"
 	msgValue    = "not a valid value"
 	msgBody     = "malformed form body"
+	msgJSONBody = "malformed JSON body"
 )
 
 var timeType = reflect.TypeOf(time.Time{})
@@ -74,15 +75,27 @@ func BindQuery(r *http.Request, dst any) *validators.Errors {
 // that map through the same tag whitelist as the form source: never decoding
 // the body straight into the model, so no JSON key can ever reach a field the
 // model did not declare — encoding/json's case-insensitive field matching is
-// precisely the over-posting hole this detour closes.
+// precisely the over-posting hole this detour closes. A body that is not one
+// JSON object is reported under the record-level $root key.
 func bindJSONBody(r *http.Request, dst any) *validators.Errors {
 	var payload map[string]any
 	dec := json.NewDecoder(r.Body)
 	dec.UseNumber()
 	if err := dec.Decode(&payload); err != nil {
-		return nil
+		return rootBodyError(r.Context(), msgJSONBody)
+	}
+	if dec.More() {
+		return rootBodyError(r.Context(), msgJSONBody)
 	}
 	return bindJSONValues(r.Context(), payload, dst)
+}
+
+// rootBodyError reports a body that cannot be decoded at all as a
+// record-level failure instead of a field failure.
+func rootBodyError(ctx context.Context, msg string) *validators.Errors {
+	fields := map[string][]string{"$root": {msg}}
+	translateMessages(ctx, fields)
+	return &validators.Errors{Scenario: ScenarioBind, Fields: fields}
 }
 
 // bindJSONValues is the JSON-source assignment core: every exported field
