@@ -114,9 +114,10 @@ func newPostHandler(t *testing.T) (*web.Handler, *base.Application) {
 
 	post := &PostController{Auth: auth}
 	pcr := h.Ctrl(post)
-	// The redirect and cancel targets the form pages resolve by name; the
-	// listing itself is a stub, its filtering has its own tests.
-	h.Get("/posts", func(c *web.Context) error { return c.JSON(nil) }).Name("post/list")
+	// The listing is the real action — the redirect and cancel targets of
+	// the form pages resolve by name too — and its filtering has its own
+	// tests.
+	pcr.Get("/posts", post.ActionList).Name("post/list")
 	// Browser pages.
 	pcr.Get("/posts/new", post.ActionNew).Name("post/new")
 	pcr.Post("/posts", post.ActionStore).Name("post/store")
@@ -262,6 +263,145 @@ func TestLikePatternEscapesWildcards(t *testing.T) {
 				t.Fatalf("likePattern(%q) = %q, want %q", tc.raw, got, tc.want)
 			}
 		})
+	}
+}
+
+// seedListPost stores one listing row straight through the database.
+func seedListPost(t *testing.T, app *base.Application, author int64, title, status string) {
+	t.Helper()
+	post := ar.New[models.Post](app.WithContext(context.Background())).New()
+	post.Title, post.Body, post.Status = title, "body of "+title, status
+	post.AuthorID = author
+	if err := post.Save(); err != nil {
+		t.Fatalf("seeding the post %q: %v", title, err)
+	}
+}
+
+// TestPostListFilterBehavior pins the listing's filter semantics end to end
+// now that the inputs bind through the form whitelist: the title narrows by
+// a contains-match and the status exactly, a user-typed LIKE wildcard (% or
+// _) matches only its literal self, a title wrapped in spaces filters as its
+// trimmed text, and an empty query lists everything.
+func TestPostListFilterBehavior(t *testing.T) {
+	h, app := newPostHandler(t)
+	client, srv := newBrowser(t, h)
+	adminID := loadAdminID(t, app)
+
+	seedListPost(t, app, adminID, "Alpha report", models.PostStatusPublished)
+	seedListPost(t, app, adminID, "Beta report", models.PostStatusDraft)
+	seedListPost(t, app, adminID, "50% off sale", models.PostStatusPublished)
+	seedListPost(t, app, adminID, "under_score note", models.PostStatusPublished)
+	// Would match the title pattern if "_" still acted as a single-character
+	// wildcard; the escaper must keep it literal.
+	seedListPost(t, app, adminID, "underXscore bait", models.PostStatusPublished)
+
+	// Title and status together: only the row matching both is listed, and
+	// the filter row echoes the submitted title.
+	body, status := getPage(t, client, srv.URL+"/posts?title=report&status=published")
+	if status != http.StatusOK {
+		t.Fatalf("filtered list status = %d, want 200", status)
+	}
+	if !strings.Contains(body, "Alpha report") {
+		t.Error("the filtered list lacks the row matching both filters")
+	}
+	for _, absent := range []string{"Beta report", "50% off sale", "under_score note", "underXscore bait"} {
+		if strings.Contains(body, absent) {
+			t.Errorf("the filtered list shows %q, which the filters must exclude", absent)
+		}
+	}
+	if !strings.Contains(body, `value="report"`) {
+		t.Error("the filter row does not echo the submitted title")
+	}
+
+	// A bare percent matches only titles containing a literal percent —
+	// user input can never reshape the match into a catch-all.
+	body, status = getPage(t, client, srv.URL+"/posts?title=%25")
+	if status != http.StatusOK {
+		t.Fatalf("percent-filtered list status = %d, want 200", status)
+	}
+	if !strings.Contains(body, "50% off sale") || strings.Contains(body, "Alpha report") {
+		t.Error("a percent filter must match only titles carrying a literal percent")
+	}
+
+	// An underscore stays literal the same way: the bait row whose title
+	// differs exactly at that character stays out.
+	body, status = getPage(t, client, srv.URL+"/posts?title=under_score")
+	if status != http.StatusOK {
+		t.Fatalf("underscore-filtered list status = %d, want 200", status)
+	}
+	if !strings.Contains(body, "under_score note") || strings.Contains(body, "underXscore bait") {
+		t.Error("an underscore filter must match only its literal self")
+	}
+
+	// A title wrapped in spaces filters as its trimmed text.
+	body, status = getPage(t, client, srv.URL+"/posts?title=%20report%20&status=published")
+	if status != http.StatusOK {
+		t.Fatalf("padded-filter list status = %d, want 200", status)
+	}
+	if !strings.Contains(body, "Alpha report") || strings.Contains(body, "Beta report") {
+		t.Error("a padded title must filter as its trimmed text")
+	}
+
+	// No filters: everything is listed.
+	body, status = getPage(t, client, srv.URL+"/posts")
+	if status != http.StatusOK {
+		t.Fatalf("unfiltered list status = %d, want 200", status)
+	}
+	for _, want := range []string{"Alpha report", "Beta report", "50% off sale", "under_score note", "underXscore bait"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the unfiltered list lacks %q", want)
+		}
+	}
+}
+
+// TestPostListKeepsFiltersInLinks pins the keep closure: sort toggles and
+// pager buttons derive the query parameters they preserve from the filter
+// model itself, so a filtered listing keeps its filters across sorting and
+// paging, an unfiltered one adds no filter parameters, and a padded title
+// survives as its trimmed text.
+func TestPostListKeepsFiltersInLinks(t *testing.T) {
+	h, app := newPostHandler(t)
+	client, srv := newBrowser(t, h)
+	adminID := loadAdminID(t, app)
+
+	// Enough matching rows to push the listing past one page of ten.
+	for i := 1; i <= 11; i++ {
+		seedListPost(t, app, adminID, "Pager report "+strconv.Itoa(i), models.PostStatusPublished)
+	}
+	seedListPost(t, app, adminID, "Pager report draft", models.PostStatusDraft)
+
+	body, status := getPage(t, client, srv.URL+"/posts?title=Pager+report&status=published")
+	if status != http.StatusOK {
+		t.Fatalf("filtered list status = %d, want 200", status)
+	}
+	if strings.Contains(body, "Pager report draft") {
+		t.Error("the filtered list shows the draft row the status filter excludes")
+	}
+	// The sort toggle of a column keeps both filter values.
+	if !strings.Contains(body, `href="/posts?sort=title&amp;status=published&amp;title=Pager+report"`) {
+		t.Error("the sort link does not keep the filter values")
+	}
+	// And so does the pager's page-two button.
+	if !strings.Contains(body, `href="/posts?page=2&amp;status=published&amp;title=Pager+report"`) {
+		t.Error("the pager link does not keep the filter values")
+	}
+
+	// A padded title survives into the kept links as its trimmed text.
+	body, _ = getPage(t, client, srv.URL+"/posts?title=%20Pager%20report%20&status=published")
+	if !strings.Contains(body, `title=Pager+report"`) {
+		t.Error("the kept title is not the trimmed text")
+	}
+	if strings.Contains(body, "title=%20Pager%20report%20") {
+		t.Error("the kept title carries the raw padded text")
+	}
+
+	// An unfiltered listing adds no filter parameters to its links.
+	body, _ = getPage(t, client, srv.URL+"/posts")
+	if strings.Contains(body, "status=published") || strings.Contains(body, "title=Pager+report") {
+		t.Error("the unfiltered listing keeps filter parameters it never had")
+	}
+	if !strings.Contains(body, `href="/posts?sort=id"`) {
+		t.Error("the unfiltered sort link lost its plain shape")
 	}
 }
 

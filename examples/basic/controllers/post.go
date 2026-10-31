@@ -248,35 +248,28 @@ func likePattern(raw string) string {
 	return "%" + likeEscaper.Replace(raw) + "%"
 }
 
-// postFilters is the filter state of the listing, read from the query
-// string the GridView filter row submits: a contains-match on the title and
-// an exact match on the status.
+// postFilters is the filter state of the listing — a form model read from
+// the query string the GridView filter row submits: a contains-match on the
+// title and an exact match on the status. The form tags are the reading
+// whitelist; how the filters assemble into SQL stays explicit below.
 type postFilters struct {
-	title  string
-	status string
+	Title  string `form:"title"`
+	Status string `form:"status"`
 }
 
 // active reports whether any filter narrows the listing.
-func (f postFilters) active() bool { return f.title != "" || f.status != "" }
-
-// readPostFilters collects the filter inputs of one request.
-func readPostFilters(r *http.Request) postFilters {
-	return postFilters{
-		title:  strings.TrimSpace(r.URL.Query().Get("title")),
-		status: r.URL.Query().Get("status"),
-	}
-}
+func (f postFilters) active() bool { return f.Title != "" || f.Status != "" }
 
 // apply narrows the listing query by the filters: the title pattern is fully
 // escaped (no user wildcard reshapes the match), the status compares
 // exactly. Both ride the base query so the count, the page fetch and every
 // link stay consistent with them.
 func (f postFilters) apply(query *ar.Query[models.Post]) *ar.Query[models.Post] {
-	if f.title != "" {
-		query = query.Where("title LIKE ?"+likeEscapeClause, likePattern(f.title))
+	if f.Title != "" {
+		query = query.Where("title LIKE ?"+likeEscapeClause, likePattern(f.Title))
 	}
-	if f.status != "" {
-		query = query.Where("status = ?", f.status)
+	if f.Status != "" {
+		query = query.Where("status = ?", f.Status)
 	}
 	return query
 }
@@ -298,7 +291,17 @@ func (pc *PostController) ActionList(c *web.Context) error {
 		params.PerPage = listPerPage
 	}
 
-	filters := readPostFilters(c.Request())
+	// The filter row reads through the form whitelist — only tagged fields
+	// assign, a query key the model did not declare is ignored — and the
+	// title is trimmed so a blank-ish input still means "no title filter".
+	// All filter fields are text, so a failed bind cannot happen today; the
+	// guard keeps a future non-text filter honest instead of silently
+	// dropping its bad value.
+	var filters postFilters
+	if errs := form.BindQuery(c.Request(), &filters); errs != nil {
+		return web.BadRequest(errs.Error())
+	}
+	filters.Title = strings.TrimSpace(filters.Title)
 	res, err := dataprovider.ActiveDataProvider[models.Post]{
 		Query:        filters.apply(ar.New[models.Post](c.Context()).With("Author")),
 		Params:       params,
@@ -314,13 +317,15 @@ func (pc *PostController) ActionList(c *web.Context) error {
 	canUpdate := can(c, "post/update")
 
 	// keep returns the query-string parameters that must survive a sort
-	// toggle or a pager click: the active filters.
+	// toggle or a pager click: the filter values the model carries, derived
+	// from its form tags instead of a hand-copied key list — a filter field
+	// added later rides along automatically.
+	filterValues := form.Values(&filters)
 	keep := func(p url.P) url.P {
-		if filters.title != "" {
-			p["title"] = filters.title
-		}
-		if filters.status != "" {
-			p["status"] = filters.status
+		for name, value := range filterValues {
+			if value != "" {
+				p[name] = value
+			}
 		}
 		return p
 	}
