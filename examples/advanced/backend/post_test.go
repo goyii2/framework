@@ -260,3 +260,68 @@ func TestBackendPostSaveOmittedFieldKeepsStoredValue(t *testing.T) {
 		t.Errorf("the omitted body was overwritten: %q", saved.Body)
 	}
 }
+
+// TestBackendPostEditRendersPermalink pins the backend's absolute-URL
+// touchpoint: with the route table's host info naming the frontend (the
+// test's stand-in for main.go's SetHostInfo line) and the partition's own
+// backend host injected by Register, the edit page's permalink renders the
+// backend domain — the explicit host beat the manager's default — while the
+// form action, the cancel link and the sidebar keep their relative shape.
+func TestBackendPostEditRendersPermalink(t *testing.T) {
+	h, app := newBackendHandler(t)
+	h.URLs().SetHostInfo("https://frontend.example.com")
+	ctx := app.WithContext(context.Background())
+
+	demo, err := ar.New[models.User](ctx).Where("username = ?", "demo").One()
+	if err != nil {
+		t.Fatalf("loading the demo account: %v", err)
+	}
+	post := ar.New[models.Post](ctx).New()
+	post.Title, post.Body, post.Status = "Backend permalink story", "Body of the backend permalink story.", models.PostStatusPublished
+	post.AuthorID = demo.ID
+	if err := post.Save(); err != nil {
+		t.Fatalf("seeding the post: %v", err)
+	}
+	id := strconv.FormatInt(post.ID, 10)
+	permalink := "https://backend.example.com/backend/posts/" + id + "/edit"
+
+	admin, srv := newBrowser(t, h)
+	login(t, admin, srv.URL, "admin", "admin123")
+
+	// The compose page carries no permalink — no row exists to address yet.
+	body, status := get(t, admin, srv.URL+"/backend/posts/new")
+	if status != http.StatusOK {
+		t.Fatalf("compose status = %d", status)
+	}
+	if strings.Contains(body, "Permalink:") {
+		t.Error("the compose page renders a permalink without a row")
+	}
+
+	body, status = get(t, admin, srv.URL+"/backend/posts/"+id+"/edit")
+	if status != http.StatusOK {
+		t.Fatalf("edit status = %d", status)
+	}
+	if !strings.Contains(body, `href="`+permalink+`"`) {
+		t.Errorf("the edit page lacks the permalink link %q", permalink)
+	}
+	// The permalink URL rides the page twice only — its href and its visible
+	// text — so no other link silently turned absolute.
+	if n := strings.Count(body, permalink); n != 2 {
+		t.Errorf("the permalink appears %d times, want 2 (href and text)", n)
+	}
+	// The manager's default host (the frontend domain) must stay off the
+	// page: the permalink's explicit host is the point of the touchpoint.
+	if strings.Contains(body, "https://frontend.example.com") {
+		t.Error("the edit page leaks the manager's default frontend host")
+	}
+	// The rest of the page keeps its relative shape: the save form posts to
+	// the row's own route, and the cancel link addresses the listing.
+	for _, rel := range []string{
+		`action="/backend/posts/` + id + `"`,
+		`href="/backend/posts"`,
+	} {
+		if !strings.Contains(body, rel) {
+			t.Errorf("the page lacks the relative address %q", rel)
+		}
+	}
+}

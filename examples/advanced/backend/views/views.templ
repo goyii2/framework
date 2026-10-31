@@ -135,10 +135,15 @@ templ postIndexPage(d PostIndexData) {
 }
 
 // postFormPage frames the ActiveForm the controller rendered — on a 422 the
-// widget already carries the messages and the refilled values.
+// widget already carries the messages and the refilled values. The permalink
+// line rides along on the edit page only: the row's address on the backend's
+// own domain, the partition's one absolute link.
 templ postFormPage(d PostFormData) {
 	<h1>{ d.Heading }</h1>
 	@d.Form
+	if d.PermalinkURL != "" {
+		<p class="meta">Permalink: <a href={ templ.URL(d.PermalinkURL) }>{ d.PermalinkURL }</a></p>
+	}
 	<p style="margin-top: 0.8rem;">
 		<a href={ templ.URL(d.CancelURL) }>Cancel</a>
 	</p>

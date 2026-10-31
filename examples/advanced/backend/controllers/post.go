@@ -24,9 +24,19 @@ import (
 	"github.com/goyii2/framework/web"
 )
 
-// PostController is the backend's post management controller.
+// PostController is the backend's post management controller. BackendHost is
+// the partition's own scheme-and-host prefix, handed in by wiring (it comes
+// from the project's configuration): the edit page's permalink builds its
+// absolute URL on it explicitly — the deployment shape where the admin face
+// runs on a domain of its own while the url manager's host info names the
+// public site.
 type PostController struct {
 	web.Controller
+
+	// BackendHost is the partition's scheme-and-host prefix
+	// ("scheme://host[:port]"); empty means the permalink degrades to the
+	// "#" cannot-create marker rather than guessing a domain.
+	BackendHost string
 }
 
 // ActionIndex is the management listing: every post newest first with each
@@ -82,11 +92,12 @@ func (pc *PostController) findPost(c *web.Context) (*models.Post, error) {
 }
 
 // ActionNew renders the compose form with a fresh draft; the refill values
-// come from a zero record, so the status select defaults to draft.
+// come from a zero record, so the status select defaults to draft. No row
+// exists yet, so the page carries no permalink.
 func (pc *PostController) ActionNew(c *web.Context) error {
 	post := ar.New[models.Post](c.Context()).New()
 	post.Status = models.PostStatusDraft
-	return renderPostForm(c, false, http.StatusOK, form.Values(post), nil)
+	return pc.renderPostForm(c, false, http.StatusOK, form.Values(post), nil)
 }
 
 // ActionStore receives the compose form. The field values bind straight
@@ -104,23 +115,25 @@ func (pc *PostController) ActionStore(c *web.Context) error {
 	}
 	post := ar.New[models.Post](c.Context()).New()
 	if errs := c.LoadForm(post, validators.ScenarioInsert); errs != nil {
-		return replayPostForm(c, false, form.Values(post), errs)
+		return pc.replayPostForm(c, false, form.Values(post), errs)
 	}
 	post.AuthorID = author.ID
 	if err := post.Save(); err != nil {
-		return replayPostForm(c, false, form.Values(post), err)
+		return pc.replayPostForm(c, false, form.Values(post), err)
 	}
 	c.App().Log().Info("post created", "id", post.ID, "title", post.Title)
 	return c.Redirect(http.StatusFound, url.To("backend/post/index", nil))
 }
 
-// ActionEdit renders the update form with the record's current values.
+// ActionEdit renders the update form with the record's current values. The
+// page also carries the row's permalink — the partition's one absolute link,
+// built on the backend's own domain.
 func (pc *PostController) ActionEdit(c *web.Context) error {
 	post, err := pc.findPost(c)
 	if err != nil {
 		return err
 	}
-	return renderPostForm(c, true, http.StatusOK, form.Values(post), nil)
+	return pc.renderPostForm(c, true, http.StatusOK, form.Values(post), nil)
 }
 
 // ActionSave receives the update form; the record is fetched first and the
@@ -133,10 +146,10 @@ func (pc *PostController) ActionSave(c *web.Context) error {
 		return err
 	}
 	if errs := c.LoadForm(post, validators.ScenarioUpdate); errs != nil {
-		return replayPostForm(c, true, form.Values(post), errs)
+		return pc.replayPostForm(c, true, form.Values(post), errs)
 	}
 	if err := post.Save(); err != nil {
-		return replayPostForm(c, true, form.Values(post), err)
+		return pc.replayPostForm(c, true, form.Values(post), err)
 	}
 	c.App().Log().Info("post updated", "id", post.ID, "title", post.Title)
 	return c.Redirect(http.StatusFound, url.To("backend/post/index", nil))
@@ -159,17 +172,24 @@ func (pc *PostController) ActionDestroy(c *web.Context) error {
 // renderPostForm renders the shared form for compose and edit through the
 // ActiveForm widget: labels, controls and — on a 422 — the validator
 // messages under the failing fields with the submitted values refilled.
-// Editing picks the heading and targets the row's save route instead of the
-// create route; status is 200 for a fresh form and 422 when a rejected
-// submission re-renders. values is the refill map the ActiveForm echoes
-// back — form.Values over the record the action holds, whether a prefilled
-// row or a rejected submission.
-func renderPostForm(c *web.Context, editing bool, status int, values map[string]string, verrs *validators.Errors) error {
+// Editing picks the heading, targets the row's save route instead of the
+// create route, and carries the row's permalink — the absolute URL built on
+// the backend's own domain (the explicit host the controller's wiring
+// injected) rather than the route table's default host info, so the link
+// stays correct in the deployment shape where the admin face runs on a
+// domain of its own. A malformed host degrades the permalink to the "#"
+// cannot-create marker, never to a half URL. status is 200 for a fresh form
+// and 422 when a rejected submission re-renders. values is the refill map
+// the ActiveForm echoes back — form.Values over the record the action holds,
+// whether a prefilled row or a rejected submission.
+func (pc *PostController) renderPostForm(c *web.Context, editing bool, status int, values map[string]string, verrs *validators.Errors) error {
 	heading := "New post"
 	action := url.To("backend/post/store", nil)
+	permalink := ""
 	if editing {
 		heading = "Edit post"
 		action = url.To("backend/post/save", url.P{"id": c.Param("id")})
+		permalink = url.Build("backend/post/edit", url.P{"id": c.Param("id")}).Host(pc.BackendHost).Absolute()
 	}
 	form := view.ActiveForm{
 		ID:     "post-form",
@@ -188,18 +208,19 @@ func renderPostForm(c *web.Context, editing bool, status int, values map[string]
 	}
 	c.SetTitle(heading)
 	return c.RenderStatus(status, "backend/post/form", views.PostFormData{
-		Heading:   heading,
-		Form:      form.Render(),
-		CancelURL: url.To("backend/post/index", nil),
+		Heading:      heading,
+		Form:         form.Render(),
+		PermalinkURL: permalink,
+		CancelURL:    url.To("backend/post/index", nil),
 	})
 }
 
 // replayPostForm re-renders the form after a rejected save: validation
 // failures come back as the 422 error set, anything else is a real error.
-func replayPostForm(c *web.Context, editing bool, values map[string]string, err error) error {
+func (pc *PostController) replayPostForm(c *web.Context, editing bool, values map[string]string, err error) error {
 	var verrs *validators.Errors
 	if !errors.As(err, &verrs) {
 		return err
 	}
-	return renderPostForm(c, editing, http.StatusUnprocessableEntity, values, verrs)
+	return pc.renderPostForm(c, editing, http.StatusUnprocessableEntity, values, verrs)
 }

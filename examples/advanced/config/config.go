@@ -36,9 +36,13 @@ type Config struct {
 	// it is injected into the console command in main.go. HostInfo is the
 	// scheme-and-host prefix absolute URLs are built on (a post page's
 	// permalink); main.go installs it on the url manager at boot.
+	// BackendHostInfo is the backend partition's own prefix — the deployment
+	// shape where the admin face runs on a domain of its own; main.go hands
+	// it to the backend partition, whose permalink builds on it explicitly.
 	Web struct {
-		Listen   string `yaml:"listen"`
-		HostInfo string `yaml:"hostInfo"`
+		Listen          string `yaml:"listen"`
+		HostInfo        string `yaml:"hostInfo"`
+		BackendHostInfo string `yaml:"backendHostInfo"`
 	} `yaml:"web"`
 
 	DB      db.Config      `yaml:"db"`

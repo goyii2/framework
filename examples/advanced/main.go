@@ -118,8 +118,12 @@ func main() {
 		fail(err)
 	}
 	// The backend partition mounts its /backend module: dark layout, admin
-	// guard and dashboard, all behind its own assembly function.
-	if err := backend.Register(handler, app, auth); err != nil {
+	// guard and dashboard, all behind its own assembly function. It also
+	// receives the backend's own host (WEB_BACKENDHOSTINFO overrides; the
+	// prod overlay interpolates a deployment's backend host) — the deployment
+	// shape where the admin face runs on a domain of its own, which its
+	// pages' permalinks build on explicitly instead of the manager's default.
+	if err := backend.Register(handler, app, auth, cfg.Web.BackendHostInfo); err != nil {
 		fail(err)
 	}
 

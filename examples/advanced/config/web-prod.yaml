@@ -25,6 +25,10 @@ web:
   # The public host absolute URLs are built on; loopback as the out-of-the-box
   # default, a deployment's real host through the variable.
   hostInfo: "${ADVANCED_HOST_INFO:-http://127.0.0.1:8090}"
+  # The backend partition's own host, for the deployments that run the admin
+  # face on a domain of its own; loopback (one port with the frontend) as the
+  # out-of-the-box default, the real backend host through the variable.
+  backendHostInfo: "${ADVANCED_BACKEND_HOST_INFO:-http://127.0.0.1:8090}"
 
 log:
   # Prod stays quieter than the console-flavored dev default.

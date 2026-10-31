@@ -38,9 +38,11 @@ import (
 // to), the auth manager over the RBAC tables, and the partition's own
 // Register — plus two accounts: admin carries the admin role through an
 // RBAC assignment, demo holds none. The handler's route table becomes the
-// url.To default, like the production assembly. The pool is capped at one
-// connection because an in-memory database exists per connection. The
-// application is returned alongside for direct database assertions.
+// url.To default, like the production assembly, and Register receives the
+// partition's own backend host — the test's stand-in for main.go handing
+// in the configured value. The pool is capped at one connection because an
+// in-memory database exists per connection. The application is returned
+// alongside for direct database assertions.
 func newBackendHandler(t *testing.T) (*web.Handler, *base.Application) {
 	t.Helper()
 	conn, err := db.New(db.Config{Driver: "sqlite", DSN: ":memory:"})
@@ -82,7 +84,7 @@ func newBackendHandler(t *testing.T) (*web.Handler, *base.Application) {
 		t.Fatalf("rbac.NewDbManager: %v", err)
 	}
 	h.SetAuthManager(auth)
-	if err := Register(h, app, auth); err != nil {
+	if err := Register(h, app, auth, "https://backend.example.com"); err != nil {
 		t.Fatalf("backend.Register: %v", err)
 	}
 
@@ -243,7 +245,7 @@ func TestRegisterRequiresFrontendLoginRoute(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rbac.NewDbManager: %v", err)
 	}
-	if err := Register(h, app, auth); err == nil {
+	if err := Register(h, app, auth, ""); err == nil {
 		t.Fatal("Register without the frontend's site/login route must error")
 	}
 }

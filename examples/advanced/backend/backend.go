@@ -38,7 +38,15 @@ const loginRoute = "site/login"
 // manager), the dark frame around the module's pages, and the dashboard in
 // the module's controller registry (so /backend/dashboard/index resolves
 // through the convention fallback as well).
-func Register(h *web.Handler, app *base.Application, auth web.AccessChecker) error {
+//
+// backendHost is the partition's own scheme-and-host prefix, from the
+// project's configuration (WEB_BACKENDHOSTINFO overrides; the prod overlay
+// interpolates a deployment's backend host). The post pages' permalinks
+// build their absolute URLs on it explicitly — the deployment shape where
+// the admin face runs on a domain of its own while the url manager's host
+// info names the public site. An invalid value never stops boot here: the
+// permalink build degrades to the "#" cannot-create marker instead.
+func Register(h *web.Handler, app *base.Application, auth web.AccessChecker, backendHost string) error {
 	login, err := loginURL(h)
 	if err != nil {
 		return err
@@ -81,8 +89,10 @@ func Register(h *web.Handler, app *base.Application, auth web.AccessChecker) err
 	// named module-relative (the registrar prefixes "backend/") so links and
 	// redirects resolve by name from either partition. The post controller
 	// joins the module registry too, so /backend/post/index resolves through
-	// the convention fallback as well.
-	post := &controllers.PostController{}
+	// the convention fallback as well. It carries the partition's own host —
+	// its permalinks build on it explicitly rather than the route table's
+	// default host info.
+	post := &controllers.PostController{BackendHost: backendHost}
 	if err := mod.RegisterController("post", post); err != nil {
 		return err
 	}

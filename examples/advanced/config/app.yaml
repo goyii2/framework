@@ -21,6 +21,13 @@ web:
   # process. WEB_HOSTINFO overrides this file; web-prod.yaml interpolates a
   # deployment's host instead.
   hostInfo: "http://127.0.0.1:8090"
+  # The backend partition's own prefix — the deployment shape where the admin
+  # face runs on a domain of its own. One process serves both partitions on
+  # one port here, so the base value mirrors hostInfo; a separate backend
+  # domain arrives through the environment (WEB_BACKENDHOSTINFO overrides
+  # this file, the same yaml-key-uppercased rule behind WEB_HOSTINFO;
+  # web-prod.yaml interpolates a deployment's backend host).
+  backendHostInfo: "http://127.0.0.1:8090"
 
 db:
   driver: sqlite

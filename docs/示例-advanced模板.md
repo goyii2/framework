@@ -37,7 +37,7 @@ go run . user/create --username demo2 --password demo123   # 建号命令（Yii2
 | `config/` | `environments/` | 项目自定义 `Config` struct + `app.yaml` + `web-dev.yaml` / `web-prod.yaml`；三台机器（环境选择 / overlay / 整字段 env 覆盖）见[第 7 节](#7-dev--prod-overlay-与-var-插值) |
 | `common/` | `common/` | 共享包：`models/`（User、Post）+ `migrations/`（user 表、RBAC 四表、post 表）；前后台 import 同一个包，共享的不止模型——会话身份解析（`models.FindIdentity`）也是它 |
 | `frontend/` | frontend 应用 | 根作用域分区：`controllers/` + `views/`（亮色 Layout）；`frontend.Register(h, app)` 装配显式路由 + 控制器注册表 |
-| `backend/` | backend 应用 | `/backend` 模块分区：`controllers/` + `views/`（深色 Layout）+ `system/`（嵌套子模块）；`backend.Register(h, app, auth)` 建模块、守卫链、dashboard、post CRUD，末尾挂 system 子模块 |
+| `backend/` | backend 应用 | `/backend` 模块分区：`controllers/` + `views/`（深色 Layout）+ `system/`（嵌套子模块）；`backend.Register(h, app, auth, cfg.Web.BackendHostInfo)` 建模块、守卫链、dashboard、post CRUD（编辑页 Permalink 用后台自有域名），末尾挂 system 子模块 |
 | `commands/` | console 控制器 | cobra 命令（`user/create`、`seed`），与 serve / migrate 同一二进制、同一套装配 |
 | `runtime/` | 运行时产物 | `advanced.sqlite` + `session/`（git 忽略，删掉即可重置演示） |
 

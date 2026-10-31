@@ -47,11 +47,14 @@ type PostRow struct {
 
 // PostFormData drives the compose/edit page: the heading and the rendered
 // ActiveForm widget (labels, controls, refilled values and — after a
-// rejected submission — the field messages).
+// rejected submission — the field messages). PermalinkURL is the edit page's
+// one absolute link — the row's address on the backend's own domain (empty
+// on compose, where no row exists yet); every other link stays relative.
 type PostFormData struct {
-	Heading   string
-	Form      templ.Component
-	CancelURL string
+	Heading      string
+	Form         templ.Component
+	PermalinkURL string
+	CancelURL    string
 }
 
 // SystemUserData drives the nested system submodule's account listing: the
