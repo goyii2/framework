@@ -1,6 +1,6 @@
 # 05: examples 迁移 builder + advanced 双域名
 
-Status: ready-for-agent
+Status: claimed
 
 **What to build:** 两个示例迁到 builder 形态并演示双域名。basic：文章页 Permalink 触点从 `url.ToAbsolute` 迁到 `url.Build(...).Absolute()`（单域名，默认 host）。advanced：`Config.Web` 增 `BackendHostInfo`（yaml `backendHostInfo`，env `WEB_BACKEND_HOSTINFO` 覆盖，prod overlay 插值——形态与既有 `HostInfo` 一致）；backend 分区的 Permalink 触点用 `url.Build(...).Host(cfg.Web.BackendHostInfo).Absolute()` 演示跨分区显式域（后台在独立域名的部署形态），frontend 触点走默认 `.Absolute()`。装配代码把 backend host 传进 backend 分区（装配函数注入，不引全局）。既有相对链接/重定向/表单 action 保持不变。
 
