@@ -1,6 +1,6 @@
 # 02: form JSON 源 + Content-Type 分发
 
-Status: ready-for-agent
+Status: claimed
 
 **What to build:** `form.Bind` 按 Content-Type 分发：`application/json` 走 **map 中转赋值**（解码到 `map[string]any` 后按 `form` tag 反射赋值，不经 `encoding/json` 直解 struct），`application/x-www-form-urlencoded` 维持既有路径。三源白名单语义统一：JSON body 中的多余字段——包括与未打 tag 导出字段大小写相近的键——赋不进任何 struct，从机制上防住直绑模型时的 over-posting；JSON 类型不匹配同样逐字段归并进 `validators.Errors.Fields`（非整包失败）。body 为空或 Content-Type 缺省/不支持时的行为做出裁决并测试固化。**走 TDD**。
 
