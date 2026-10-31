@@ -106,6 +106,12 @@ Controller 内的最小可路由请求处理单元（如 `post/view` 中的 `vie
 
 与模型校验错误回显联动的服务端表单渲染组件；客户端校验不在框架内做。
 
+### 表单模型（Form Model）
+
+带 `form` 标签的普通 struct，经框架一次完成请求绑定与按场景校验；标签即赋值白名单，未打标签的字段不参与绑定。
+
+- 避免：yii\base\Model 的动态属性机制（attributes() / scenarios() / load() 大规模赋值）——以标签绑定与显式字段取代
+
 ### 列表大件（GridView / ListView）
 
 基于 DataProvider 结果渲染数据表格/条目列表的服务端大件；纯渲染、不自行取数。
