@@ -149,13 +149,17 @@ url.To("post/index", url.P{"page": "2", "sort": "-id"})           // 冗余参�
 url.SetDefault(handler.URLs())                 // 反向生成走这个路由表（既有装配）
 handler.URLs().SetHostInfo(cfg.Web.HostInfo)   // 一体字符串 scheme://host[:port]，如 https://example.com
 
-url.ToAbsolute("post/view", url.P{"id": "7"})  // -> https://example.com/post/7
+url.Build("post/view", url.P{"id": "7"}).Absolute()  // -> https://example.com/post/7（默认域）
+url.Build("post/view", url.P{"id": "7"}).String()    // -> /post/7（相对，等价 url.To）
+url.Build("backend/post/edit", url.P{"id": "7"}).Host(backendHost).Absolute()
+// -> https://backend.example.com/backend/posts/7/edit —— 本次生成显式指定域（如后台独立域名）
 ```
 
+- `url.Build(name, params)` 经默认管理器起链（与 `url.To` 同源同表）：`.String()` 收相对 URL（等价 `url.To`），`.Absolute()` 收绝对 URL——路由解析规则与 `url.To` 完全一致（注册名走 pattern、未注册走约定回退），仅在结果前拼主机信息；任何失败（含未配置主机信息、命名路由缺路径参数）返回 `"#"`。
+- `.Host(h)` 为**本次生成**显式指定域（跨分区 / 后台独立域名的部署形态）：值在 `.Absolute()` 时校验（合法形状与 `SetHostInfo` 一致、尾斜杠容错），非法值 `.Absolute()` 返回 `"#"`、请求路径不 panic；空串清除覆盖，`.String()` 不受影响。
 - `SetHostInfo` 尾斜杠容错（`https://example.com/` 与不带斜杠产出一致）；缺 scheme、缺 host，或带 userinfo / 多余路径 / query / fragment 的值是装配错误，boot 期直接 panic。
-- `url.ToAbsolute` 路由解析规则与 `url.To` 完全一致（注册名走 pattern、未注册走约定回退），仅在前拼主机信息；任何失败（含未配置主机信息）返回 `"#"`。
-- 要显性错误的消费者走 `handler.URLs().AbsoluteURL(name, url.P{...})`：未配置主机信息或命名路由缺路径参数时返回 error，不产出半截网址。
-- 可跑示例见 `examples/basic` 与 `examples/advanced` 的文章页 Permalink 行（`Web.HostInfo` 配置，yaml key `hostInfo`）。
+- 配置键：yaml `hostInfo`（整字段 env 覆盖 `WEB_HOSTINFO`）；跨分区显式域 advanced 示例为 yaml `backendHostInfo`（env `WEB_BACKENDHOSTINFO`），经装配函数注入消费点、不引全局。
+- 可跑示例：`examples/basic` 文章页与 `examples/advanced` frontend 文章页的 Permalink 行走默认域 `.Absolute()`；advanced backend 编辑页 Permalink 走 `.Host(...).Absolute()` 演示双域名。
 
 ## 相关文档
 

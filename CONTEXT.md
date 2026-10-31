@@ -68,7 +68,7 @@ Controller 内的最小可路由请求处理单元（如 `post/view` 中的 `vie
 
 ### 主机信息（hostInfo）
 
-反向生成绝对网址（`scheme://host[:port]` + 路径）所用的前缀，一体字符串，boot 期由装配代码设置在 url.Manager 上；服务邮件、队列、OAuth 回调等无请求上下文的消费者。
+管理器上的默认域：反向生成绝对网址（`scheme://host[:port]` + 路径）所用的前缀，一体字符串，boot 期由装配代码设置在 url.Manager 上；builder 的 `.Absolute()` 未用 `.Host(...)` 显式指定域时以其为缺省前缀。服务邮件、队列、OAuth 回调等无请求上下文的消费者。
 
 - 避免：请求推断来源（从当前请求的 Host / X-Forwarded-Proto 推导）——明确不做；需要跟随当前访问域名的场景用相对 URL
 
