@@ -1,0 +1,199 @@
+package form
+
+import (
+	"context"
+	"encoding"
+	"fmt"
+	"mime"
+	"net/http"
+	"net/url"
+	"reflect"
+	"strconv"
+	"time"
+
+	"github.com/goyii2/framework/i18n"
+	"github.com/goyii2/framework/validators"
+)
+
+// ScenarioBind labels the validators.Errors binding produces: these messages
+// report request values that failed to parse, before any validation rule has
+// run.
+const ScenarioBind validators.Scenario = "bind"
+
+// Parse-failure message ids. Each doubles as the i18n id looked up in the
+// validators' message category, exactly like rule messages.
+const (
+	msgInteger  = "not a valid integer"
+	msgNumber   = "not a valid number"
+	msgBoolean  = "not a valid boolean"
+	msgDateTime = "not a valid date-time"
+	msgValue    = "not a valid value"
+	msgBody     = "malformed form body"
+)
+
+var timeType = reflect.TypeOf(time.Time{})
+
+// Bind parses the request's x-www-form-urlencoded body into dst — a pointer
+// to a form model struct. Fields opt in with a `form:"name"` tag; the tag is
+// the whitelist: untagged exported fields and fields tagged "-" are never
+// assigned, and request keys with no tagged field (hidden inputs like _csrf
+// among them) are ignored. It returns nil when every submitted value parsed,
+// and a *validators.Errors whose Fields map each failing key to its parse
+// message otherwise. A body of any other content type binds nothing and
+// reports no failure.
+func Bind(r *http.Request, dst any) *validators.Errors {
+	if !isFormEncoded(r) {
+		return nil
+	}
+	if err := r.ParseForm(); err != nil {
+		fields := map[string][]string{"$root": {msgBody}}
+		translateMessages(r.Context(), fields)
+		return &validators.Errors{Scenario: ScenarioBind, Fields: fields}
+	}
+	return bindValues(r.Context(), r.PostForm, dst)
+}
+
+// BindQuery parses the request's URL query into dst under the same rules as
+// Bind, reading the query string as the sole source.
+func BindQuery(r *http.Request, dst any) *validators.Errors {
+	return bindValues(r.Context(), r.URL.Query(), dst)
+}
+
+// isFormEncoded reports whether the request body declares the form content
+// type; parameters such as a charset suffix are tolerated.
+func isFormEncoded(r *http.Request) bool {
+	mediatype, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	return err == nil && mediatype == "application/x-www-form-urlencoded"
+}
+
+// bindValues is the shared assignment core: every exported field carrying a
+// form tag whose key appears in values gets the value parsed into it, and the
+// messages of values that failed to parse are collected per key.
+func bindValues(ctx context.Context, values url.Values, dst any) *validators.Errors {
+	v := reflect.ValueOf(dst)
+	if v.Kind() != reflect.Pointer || v.IsNil() {
+		panic("form: destination must be a non-nil pointer to a struct")
+	}
+	v = v.Elem()
+	if v.Kind() != reflect.Struct {
+		panic("form: destination must be a non-nil pointer to a struct")
+	}
+	fields := map[string][]string{}
+	t := v.Type()
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		if !field.IsExported() {
+			continue
+		}
+		name := field.Tag.Get("form")
+		if name == "" || name == "-" {
+			continue
+		}
+		vals, ok := values[name]
+		if !ok || len(vals) == 0 {
+			continue
+		}
+		if msg := setField(v.Field(i), vals); msg != "" {
+			fields[name] = append(fields[name], msg)
+		}
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	translateMessages(ctx, fields)
+	return &validators.Errors{Scenario: ScenarioBind, Fields: fields}
+}
+
+// translateMessages runs every field message through the i18n lookup for the
+// request's language, exactly as rule validation messages are translated: the
+// message is the id under the validators' message category, a miss keeps the
+// source text, and contexts without a message source change nothing.
+func translateMessages(ctx context.Context, fields map[string][]string) {
+	if ctx == nil {
+		return
+	}
+	if _, ok := i18n.SourceFromContext(ctx); !ok {
+		return
+	}
+	for field, messages := range fields {
+		translated := make([]string, len(messages))
+		for i, msg := range messages {
+			translated[i] = i18n.T(ctx, validators.MessageCategory, msg, nil)
+		}
+		fields[field] = translated
+	}
+}
+
+// setField assigns vals to the addressable field fv and returns "" on
+// success, or the message id describing why the value did not parse. The
+// first value feeds scalar fields; a lone blank value means the input was
+// left unfilled and leaves every field except text untouched. A tagged field
+// of a type outside the supported set is a programming error and panics when
+// a value arrives for it.
+func setField(fv reflect.Value, vals []string) string {
+	if fv.Kind() != reflect.String && len(vals) == 1 && vals[0] == "" {
+		return ""
+	}
+	raw := vals[0]
+
+	// time.Time gets its own message; the generic TextUnmarshaler branch
+	// below would also parse it (RFC 3339 is time.Time's own wire format)
+	// but report it as an opaque bad value.
+	if fv.Type() == timeType {
+		parsed, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			return msgDateTime
+		}
+		fv.Set(reflect.ValueOf(parsed))
+		return ""
+	}
+	// Custom parsing wins over the generic kinds: a field whose type
+	// implements encoding.TextUnmarshaler decodes itself.
+	if u, ok := fv.Addr().Interface().(encoding.TextUnmarshaler); ok {
+		if err := u.UnmarshalText([]byte(raw)); err != nil {
+			return msgValue
+		}
+		return ""
+	}
+
+	switch fv.Kind() {
+	case reflect.String:
+		fv.SetString(raw)
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		n, err := strconv.ParseInt(raw, 10, fv.Type().Bits())
+		if err != nil {
+			return msgInteger
+		}
+		fv.SetInt(n)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		n, err := strconv.ParseUint(raw, 10, fv.Type().Bits())
+		if err != nil {
+			return msgInteger
+		}
+		fv.SetUint(n)
+	case reflect.Float32, reflect.Float64:
+		f, err := strconv.ParseFloat(raw, fv.Type().Bits())
+		if err != nil {
+			return msgNumber
+		}
+		fv.SetFloat(f)
+	case reflect.Bool:
+		b, err := strconv.ParseBool(raw)
+		if err != nil {
+			return msgBoolean
+		}
+		fv.SetBool(b)
+	case reflect.Slice:
+		if fv.Type().Elem().Kind() != reflect.String {
+			panic(fmt.Sprintf("form: field of type %s is not supported by form binding", fv.Type()))
+		}
+		out := reflect.MakeSlice(fv.Type(), len(vals), len(vals))
+		for i, val := range vals {
+			out.Index(i).SetString(val)
+		}
+		fv.Set(out)
+	default:
+		panic(fmt.Sprintf("form: field of type %s is not supported by form binding", fv.Type()))
+	}
+	return ""
+}
