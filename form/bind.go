@@ -3,6 +3,7 @@ package form
 import (
 	"context"
 	"encoding"
+	"encoding/json"
 	"fmt"
 	"mime"
 	"net/http"
@@ -33,24 +34,34 @@ const (
 
 var timeType = reflect.TypeOf(time.Time{})
 
-// Bind parses the request's x-www-form-urlencoded body into dst — a pointer
-// to a form model struct. Fields opt in with a `form:"name"` tag; the tag is
-// the whitelist: untagged exported fields and fields tagged "-" are never
-// assigned, and request keys with no tagged field (hidden inputs like _csrf
-// among them) are ignored. It returns nil when every submitted value parsed,
-// and a *validators.Errors whose Fields map each failing key to its parse
-// message otherwise. A body of any other content type binds nothing and
-// reports no failure.
+// Bind parses the request body into dst — a pointer to a form model struct —
+// dispatching on the body's declared content type: an application/json body
+// goes through the JSON source, an x-www-form-urlencoded body through the form
+// source. Fields opt in with a `form:"name"` tag; the tag is the whitelist:
+// untagged exported fields and fields tagged "-" are never assigned, and
+// request keys with no tagged field (hidden inputs like _csrf among them) are
+// ignored. It returns nil when every submitted value parsed, and a
+// *validators.Errors whose Fields map each failing key to its parse message
+// otherwise. A body of any other content type binds nothing and reports no
+// failure.
 func Bind(r *http.Request, dst any) *validators.Errors {
-	if !isFormEncoded(r) {
+	mediatype, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil {
 		return nil
 	}
-	if err := r.ParseForm(); err != nil {
-		fields := map[string][]string{"$root": {msgBody}}
-		translateMessages(r.Context(), fields)
-		return &validators.Errors{Scenario: ScenarioBind, Fields: fields}
+	switch mediatype {
+	case "application/json":
+		return bindJSONBody(r, dst)
+	case "application/x-www-form-urlencoded":
+		if err := r.ParseForm(); err != nil {
+			fields := map[string][]string{"$root": {msgBody}}
+			translateMessages(r.Context(), fields)
+			return &validators.Errors{Scenario: ScenarioBind, Fields: fields}
+		}
+		return bindValues(r.Context(), r.PostForm, dst)
+	default:
+		return nil
 	}
-	return bindValues(r.Context(), r.PostForm, dst)
 }
 
 // BindQuery parses the request's URL query into dst under the same rules as
@@ -59,11 +70,60 @@ func BindQuery(r *http.Request, dst any) *validators.Errors {
 	return bindValues(r.Context(), r.URL.Query(), dst)
 }
 
-// isFormEncoded reports whether the request body declares the form content
-// type; parameters such as a charset suffix are tolerated.
-func isFormEncoded(r *http.Request) bool {
-	mediatype, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	return err == nil && mediatype == "application/x-www-form-urlencoded"
+// bindJSONBody reads the JSON body into a generic map first and assigns from
+// that map through the same tag whitelist as the form source: never decoding
+// the body straight into the model, so no JSON key can ever reach a field the
+// model did not declare — encoding/json's case-insensitive field matching is
+// precisely the over-posting hole this detour closes.
+func bindJSONBody(r *http.Request, dst any) *validators.Errors {
+	var payload map[string]any
+	dec := json.NewDecoder(r.Body)
+	dec.UseNumber()
+	if err := dec.Decode(&payload); err != nil {
+		return nil
+	}
+	return bindJSONValues(r.Context(), payload, dst)
+}
+
+// bindJSONValues is the JSON-source assignment core: every exported field
+// carrying a form tag whose exact key appears in the payload gets the value
+// converted into it, and the messages of values that failed to convert are
+// collected per key.
+func bindJSONValues(ctx context.Context, payload map[string]any, dst any) *validators.Errors {
+	v := reflect.ValueOf(dst)
+	if v.Kind() != reflect.Pointer || v.IsNil() {
+		panic("form: destination must be a non-nil pointer to a struct")
+	}
+	v = v.Elem()
+	if v.Kind() != reflect.Struct {
+		panic("form: destination must be a non-nil pointer to a struct")
+	}
+	fields := map[string][]string{}
+	t := v.Type()
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		if !field.IsExported() {
+			continue
+		}
+		name := field.Tag.Get("form")
+		if name == "" || name == "-" {
+			continue
+		}
+		value, ok := payload[name]
+		if !ok {
+			continue
+		}
+		if fv := v.Field(i); fv.Kind() == reflect.String {
+			if s, ok := value.(string); ok {
+				fv.SetString(s)
+			}
+		}
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	translateMessages(ctx, fields)
+	return &validators.Errors{Scenario: ScenarioBind, Fields: fields}
 }
 
 // bindValues is the shared assignment core: every exported field carrying a

@@ -327,17 +327,19 @@ func TestEmptySourcesLeaveZeroValues(t *testing.T) {
 	}
 }
 
-func TestBindIgnoresNonFormBodies(t *testing.T) {
-	// A body that is not form-urlencoded binds nothing: only the declared
-	// form source is read.
-	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"login":"ada"}`))
-	req.Header.Set("Content-Type", "application/json")
-	f := stringsForm{}
-	if errs := Bind(req, &f); errs != nil {
-		t.Fatalf("Bind(json body) = %v, want nil", errs)
-	}
-	if f.Login != "" {
-		t.Errorf("Login = %q, want the zero value", f.Login)
+func TestBindIgnoresUnsupportedBodies(t *testing.T) {
+	// A body whose content type is neither form-urlencoded nor JSON binds
+	// nothing: only the two declared body sources are read.
+	for _, contentType := range []string{"text/plain", "multipart/form-data"} {
+		req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader("login=ada"))
+		req.Header.Set("Content-Type", contentType)
+		f := stringsForm{}
+		if errs := Bind(req, &f); errs != nil {
+			t.Fatalf("Bind(%s body) = %v, want nil", contentType, errs)
+		}
+		if f.Login != "" {
+			t.Errorf("Login = %q after %s body, want the zero value", f.Login, contentType)
+		}
 	}
 }
 
@@ -345,6 +347,10 @@ func TestNonStructDestinationsPanic(t *testing.T) {
 	req := formRequest(http.MethodPost, "/login", url.Values{"login": {"ada"}})
 	mustPanic(t, "form: destination", func() { _ = Bind(req, stringsForm{}) })
 	mustPanic(t, "form: destination", func() { _ = Bind(req, (*stringsForm)(nil)) })
+	// The JSON source applies the same destination checks.
+	jreq := jsonRequest(`{"login":"ada"}`)
+	mustPanic(t, "form: destination", func() { _ = Bind(jreq, stringsForm{}) })
+	mustPanic(t, "form: destination", func() { _ = Bind(jsonRequest(`{}`), (*stringsForm)(nil)) })
 }
 
 func mustPanic(t *testing.T, want string, fn func()) {
