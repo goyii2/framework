@@ -2,8 +2,8 @@
 # in main.go (code owns behavior, yaml owns values).
 #
 # Every value below can be overridden through the matching environment
-# variable (field path upper-cased): DB_DSN, WEB_LISTEN, SESSION_PATH,
-# APP_DEBUG, ...
+# variable (field path upper-cased): DB_DSN, WEB_LISTEN, WEB_HOSTINFO,
+# SESSION_PATH, APP_DEBUG, ...
 #
 # The active environment (GOYII_ENV, default dev) overlays this file with
 # web-<env>.yaml when that file exists — see web-dev.yaml. This base file
@@ -15,6 +15,12 @@ app:
 
 web:
   listen: "127.0.0.1:8090"
+  # The scheme-and-host prefix absolute URLs are built on (a post page's
+  # permalink); main.go installs it on the url manager at boot. A value
+  # without scheme or host is a boot-time wiring mistake and stops the
+  # process. WEB_HOSTINFO overrides this file; web-prod.yaml interpolates a
+  # deployment's host instead.
+  hostInfo: "http://127.0.0.1:8090"
 
 db:
   driver: sqlite

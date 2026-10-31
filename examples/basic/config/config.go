@@ -36,9 +36,12 @@ type Config struct {
 	} `yaml:"app"`
 
 	// Web carries the HTTP server's own values. Listen is where serve binds;
-	// it is injected into the console command in main.go.
+	// it is injected into the console command in main.go. HostInfo is the
+	// scheme-and-host prefix absolute URLs are built on (the post page's
+	// permalink); main.go installs it on the url manager at boot.
 	Web struct {
-		Listen string `yaml:"listen"`
+		Listen   string `yaml:"listen"`
+		HostInfo string `yaml:"hostInfo"`
 	} `yaml:"web"`
 
 	DB      db.Config      `yaml:"db"`

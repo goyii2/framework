@@ -71,6 +71,7 @@ func TestEmailAPIKeyEnvironmentOverride(t *testing.T) {
 func TestLoadFillsIdentityAndComponentSections(t *testing.T) {
 	t.Setenv("GOYII_ENV", "dev")
 	t.Setenv("EMAIL_APIKEY", "")
+	t.Setenv("WEB_HOSTINFO", "")
 
 	cfg, err := goyii.LoadAs[Config](".")
 	if err != nil {
@@ -81,6 +82,9 @@ func TestLoadFillsIdentityAndComponentSections(t *testing.T) {
 	}
 	if cfg.Web.Listen != "127.0.0.1:8090" {
 		t.Fatalf("Web.Listen = %q, want 127.0.0.1:8090", cfg.Web.Listen)
+	}
+	if cfg.Web.HostInfo != "http://127.0.0.1:8090" {
+		t.Fatalf("Web.HostInfo = %q, want the app.yaml value http://127.0.0.1:8090", cfg.Web.HostInfo)
 	}
 	if cfg.DB.Driver != "sqlite" || cfg.DB.DSN == "" {
 		t.Fatalf("DB = %+v, want the sqlite walkthrough connection", cfg.DB)

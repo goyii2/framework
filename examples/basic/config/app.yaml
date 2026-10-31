@@ -2,8 +2,8 @@
 # main.go (code owns behavior, yaml owns values).
 #
 # Every value below can be overridden through the matching environment
-# variable (field path upper-cased): DB_DSN, WEB_LISTEN, CACHE_PATH,
-# SESSION_PATH, APP_DEBUG, EMAIL_APIKEY, ...
+# variable (field path upper-cased): DB_DSN, WEB_LISTEN, WEB_HOSTINFO,
+# CACHE_PATH, SESSION_PATH, APP_DEBUG, EMAIL_APIKEY, ...
 #
 # The active environment (GOYII_ENV, default dev) overlays this file with
 # web-<env>.yaml when that file exists — see web-dev.yaml.
@@ -13,6 +13,11 @@ app:
 
 web:
   listen: "127.0.0.1:8090"
+  # The scheme-and-host prefix absolute URLs are built on (the post page's
+  # permalink); main.go installs it on the url manager at boot. A value
+  # without scheme or host is a boot-time wiring mistake and stops the
+  # process. WEB_HOSTINFO overrides this file.
+  hostInfo: "http://127.0.0.1:8090"
   # The example serves a JSON API plus CSRF-protected write requests, so the
   # convention fallback and CSRF validation both stay enabled (defaults).
 

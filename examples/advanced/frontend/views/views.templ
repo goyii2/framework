@@ -151,12 +151,13 @@ templ postsPage(d PostListData) {
 	}
 }
 
-// postViewPage is the public detail page: byline, body and the way back to
-// the listing.
+// postViewPage is the public detail page: byline, body, the permalink (the
+// one absolute link of the partition) and the way back to the listing.
 templ postViewPage(d PostShowData) {
 	<h1>{ d.Title }</h1>
 	<p class="meta">by { d.Author } · { d.Created }</p>
 	<div class="post-body">{ d.Body }</div>
+	<p class="meta">Permalink: <a href={ templ.URL(d.PermalinkURL) }>{ d.PermalinkURL }</a></p>
 	<p><a href={ templ.URL(d.BackURL) }>Back to posts</a></p>
 }
 

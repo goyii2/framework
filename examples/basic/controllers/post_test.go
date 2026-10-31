@@ -405,6 +405,42 @@ func TestPostListKeepsFiltersInLinks(t *testing.T) {
 	}
 }
 
+// TestPostShowRendersPermalink pins the absolute-URL touchpoint: with host
+// info wired on the route table (the test's stand-in for main.go's
+// SetHostInfo line), the detail page's permalink renders the scheme, host
+// and the named route's path while everything else on the page stays
+// relative — the permalink is the one absolute link of the browser face.
+func TestPostShowRendersPermalink(t *testing.T) {
+	h, app := newPostHandler(t)
+	h.URLs().SetHostInfo("https://basic.example.com")
+	client, srv := newBrowser(t, h)
+
+	seedListPost(t, app, loadAdminID(t, app), "Permalink story", models.PostStatusPublished)
+	post, err := ar.New[models.Post](app.WithContext(context.Background())).Where("title = ?", "Permalink story").One()
+	if err != nil {
+		t.Fatalf("loading the seeded post: %v", err)
+	}
+	permalink := "https://basic.example.com/posts/" + strconv.FormatInt(post.ID, 10)
+
+	body, status := getPage(t, client, srv.URL+"/posts/"+strconv.FormatInt(post.ID, 10))
+	if status != http.StatusOK {
+		t.Fatalf("detail status = %d, want 200", status)
+	}
+	if !strings.Contains(body, `href="`+permalink+`"`) {
+		t.Errorf("the detail page lacks the permalink link %q", permalink)
+	}
+	// The permalink URL rides the page twice only — its href and its visible
+	// text — so no other link silently turned absolute.
+	if n := strings.Count(body, permalink); n != 2 {
+		t.Errorf("the permalink appears %d times, want 2 (href and text)", n)
+	}
+	// The rest of the page keeps its relative shape: the back link and the
+	// breadcrumb's posts entry address the site itself, never an origin.
+	if !strings.Contains(body, `href="/posts"`) {
+		t.Error("the page lacks the relative back link href=\"/posts\"")
+	}
+}
+
 // TestPostJSONCreateFlow pins the create side of the JSON API: a valid body
 // stores the row with the signed-in author, a body the rules reject answers
 // the flat 422 map without writing, a body that is not one JSON object is

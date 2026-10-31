@@ -50,9 +50,10 @@ func (pc *PostController) ActionIndex(c *web.Context) error {
 	return c.Render("post/index", views.PostListData{Posts: cards})
 }
 
-// ActionView renders one published post: title, byline and body, with the
-// back link to the listing. Drafts and unknown ids answer the unified 404 —
-// the public site resolves published rows only.
+// ActionView renders one published post: title, byline and body, the
+// permalink (the partition's one absolute link, prefixed with the configured
+// host info) and the back link to the listing. Drafts and unknown ids answer
+// the unified 404 — the public site resolves published rows only.
 func (pc *PostController) ActionView(c *web.Context) error {
 	id, err := c.ParamInt64("id")
 	if err != nil {
@@ -68,11 +69,12 @@ func (pc *PostController) ActionView(c *web.Context) error {
 	}
 	c.SetTitle(post.Title)
 	return c.Render("post/view", views.PostShowData{
-		Title:   post.Title,
-		Body:    post.Body,
-		Author:  post.AuthorName(),
-		Created: post.CreatedAt.Format("2006-01-02 15:04"),
-		BackURL: url.To("post/index", nil),
+		Title:        post.Title,
+		Body:         post.Body,
+		Author:       post.AuthorName(),
+		Created:      post.CreatedAt.Format("2006-01-02 15:04"),
+		PermalinkURL: url.ToAbsolute("post/view", url.P{"id": strconv.FormatInt(post.ID, 10)}),
+		BackURL:      url.To("post/index", nil),
 	})
 }
 

@@ -22,6 +22,9 @@ web:
   # The listen address a deployment injects; loopback with the demo port as
   # the out-of-the-box default.
   listen: "${ADVANCED_LISTEN:-127.0.0.1:8090}"
+  # The public host absolute URLs are built on; loopback as the out-of-the-box
+  # default, a deployment's real host through the variable.
+  hostInfo: "${ADVANCED_HOST_INFO:-http://127.0.0.1:8090}"
 
 log:
   # Prod stays quieter than the console-flavored dev default.

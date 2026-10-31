@@ -56,6 +56,7 @@ func TestLoadProdOverlayInterpolatesDefaults(t *testing.T) {
 	t.Setenv("APP_DEBUG", "")
 	t.Setenv("ADVANCED_LISTEN", "")
 	t.Setenv("ADVANCED_LOG_LEVEL", "")
+	t.Setenv("ADVANCED_HOST_INFO", "")
 
 	cfg, err := goyii.LoadAs[Config](".")
 	if err != nil {
@@ -66,6 +67,9 @@ func TestLoadProdOverlayInterpolatesDefaults(t *testing.T) {
 	}
 	if cfg.Web.Listen != "127.0.0.1:8090" {
 		t.Fatalf("Web.Listen = %q, want the placeholder default 127.0.0.1:8090", cfg.Web.Listen)
+	}
+	if cfg.Web.HostInfo != "http://127.0.0.1:8090" {
+		t.Fatalf("Web.HostInfo = %q, want the placeholder default http://127.0.0.1:8090", cfg.Web.HostInfo)
 	}
 	if cfg.Log.Level != "warn" {
 		t.Fatalf("Log.Level = %q, want the placeholder default warn", cfg.Log.Level)
@@ -80,6 +84,7 @@ func TestLoadProdOverlayInterpolatesEnvironment(t *testing.T) {
 	t.Setenv("APP_DEBUG", "")
 	t.Setenv("ADVANCED_LISTEN", "10.0.0.9:8443")
 	t.Setenv("ADVANCED_LOG_LEVEL", "info")
+	t.Setenv("ADVANCED_HOST_INFO", "https://advanced.example.com")
 
 	cfg, err := goyii.LoadAs[Config](".")
 	if err != nil {
@@ -87,6 +92,9 @@ func TestLoadProdOverlayInterpolatesEnvironment(t *testing.T) {
 	}
 	if cfg.Web.Listen != "10.0.0.9:8443" {
 		t.Fatalf("Web.Listen = %q, want the interpolated 10.0.0.9:8443", cfg.Web.Listen)
+	}
+	if cfg.Web.HostInfo != "https://advanced.example.com" {
+		t.Fatalf("Web.HostInfo = %q, want the interpolated https://advanced.example.com", cfg.Web.HostInfo)
 	}
 	if cfg.Log.Level != "info" {
 		t.Fatalf("Log.Level = %q, want the interpolated info", cfg.Log.Level)
@@ -114,6 +122,7 @@ func TestDebugEnvironmentOverride(t *testing.T) {
 func TestLoadFillsIdentityAndComponentSections(t *testing.T) {
 	t.Setenv("GOYII_ENV", "dev")
 	t.Setenv("APP_DEBUG", "")
+	t.Setenv("WEB_HOSTINFO", "")
 
 	cfg, err := goyii.LoadAs[Config](".")
 	if err != nil {
@@ -124,6 +133,9 @@ func TestLoadFillsIdentityAndComponentSections(t *testing.T) {
 	}
 	if cfg.Web.Listen != "127.0.0.1:8090" {
 		t.Fatalf("Web.Listen = %q, want 127.0.0.1:8090", cfg.Web.Listen)
+	}
+	if cfg.Web.HostInfo != "http://127.0.0.1:8090" {
+		t.Fatalf("Web.HostInfo = %q, want the app.yaml value http://127.0.0.1:8090", cfg.Web.HostInfo)
 	}
 	if cfg.DB.Driver != "sqlite" || cfg.DB.DSN == "" {
 		t.Fatalf("DB = %+v, want the sqlite connection", cfg.DB)

@@ -91,8 +91,12 @@ func main() {
 	handler := web.NewHandler(app)
 	// Reverse URL generation: the partitions and their views resolve links
 	// by route name (url.To), so this handler's named-route table is the
-	// package-level default they read.
+	// package-level default they read. Absolute generation prefixes the host
+	// info from the project's configuration (WEB_HOSTINFO overrides; the prod
+	// overlay interpolates a deployment's host), and a malformed value fails
+	// boot here instead of handing half-configured absolute URLs around.
 	url.SetDefault(handler.URLs())
+	handler.URLs().SetHostInfo(cfg.Web.HostInfo)
 	// The shared user model resolves a session's stored identity id back to
 	// the account row — the bridge that turns a session cookie into the
 	// logged-in state the frontend navigation shows.

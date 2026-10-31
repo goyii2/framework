@@ -436,9 +436,10 @@ func (pc *PostController) findPost(c *web.Context) (*models.Post, error) {
 }
 
 // ActionShow renders the detail page: the DetailView widget over explicit
-// rows, the breadcrumbs trail, and the action buttons the RBAC manager
-// allows (edit for post/update holders, delete for admin through the
-// hierarchy).
+// rows, the breadcrumbs trail, the permalink (the one absolute link of the
+// browser face, prefixed with the configured host info), and the action
+// buttons the RBAC manager allows (edit for post/update holders, delete for
+// admin through the hierarchy).
 func (pc *PostController) ActionShow(c *web.Context) error {
 	post, err := pc.findPost(c)
 	if err != nil {
@@ -462,15 +463,16 @@ func (pc *PostController) ActionShow(c *web.Context) error {
 
 	c.SetTitle(post.Title)
 	return c.Render("post/show", views.PostShowData{
-		Breadcrumbs: views.Breadcrumbs(ctx, post.Title),
-		Detail:      detail,
-		Title:       post.Title,
-		CanUpdate:   can(c, "post/update"),
-		CanDelete:   can(c, "post/delete"),
-		EditURL:     url.To("post/edit", url.P{"id": postID(post)}),
-		DeleteURL:   url.To("post/destroy", url.P{"id": postID(post)}),
-		BackURL:     url.To("post/list", nil),
-		CSRF:        c.CsrfToken(),
+		Breadcrumbs:  views.Breadcrumbs(ctx, post.Title),
+		Detail:       detail,
+		Title:        post.Title,
+		PermalinkURL: url.ToAbsolute("post/show", url.P{"id": postID(post)}),
+		CanUpdate:    can(c, "post/update"),
+		CanDelete:    can(c, "post/delete"),
+		EditURL:      url.To("post/edit", url.P{"id": postID(post)}),
+		DeleteURL:    url.To("post/destroy", url.P{"id": postID(post)}),
+		BackURL:      url.To("post/list", nil),
+		CSRF:         c.CsrfToken(),
 	})
 }
 

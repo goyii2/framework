@@ -180,6 +180,11 @@ func main() {
 	registerRoutes(handler, app, auth, notify)
 	views.Register(handler.Views())
 	url.SetDefault(handler.URLs()) // url.To resolves this handler's named routes
+	// Absolute URL generation: the scheme-and-host prefix comes from the
+	// project's configuration (WEB_HOSTINFO overrides), and the manager's
+	// boot-time validation rejects a malformed value here instead of handing
+	// half-configured absolute URLs to consumers.
+	handler.URLs().SetHostInfo(cfg.Web.HostInfo)
 
 	con := console.New(app, console.WithHandler(handler), console.WithListen(cfg.Web.Listen))
 	con.AddCommand(migratecommands.New(app, migrations.All(),

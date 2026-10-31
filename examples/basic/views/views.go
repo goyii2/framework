@@ -76,17 +76,20 @@ type PostsListData struct {
 	CreateURL string
 }
 
-// PostShowData drives the detail page.
+// PostShowData drives the detail page. PermalinkURL is the one absolute link
+// of the browser face — the host info main.go installs on the url manager
+// prefixed onto the named route — while every other link stays relative.
 type PostShowData struct {
-	Breadcrumbs templ.Component
-	Detail      templ.Component
-	Title       string
-	CanUpdate   bool
-	CanDelete   bool
-	EditURL     string
-	DeleteURL   string
-	BackURL     string
-	CSRF        string
+	Breadcrumbs  templ.Component
+	Detail       templ.Component
+	Title        string
+	PermalinkURL string
+	CanUpdate    bool
+	CanDelete    bool
+	EditURL      string
+	DeleteURL    string
+	BackURL      string
+	CSRF         string
 }
 
 // PostFormData drives the shared create/edit form page; Form is the

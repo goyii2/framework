@@ -99,3 +99,47 @@ func TestFrontendShowsPublishedPostsToGuests(t *testing.T) {
 		}
 	}
 }
+
+// TestFrontendPostViewRendersPermalink pins the absolute-URL touchpoint:
+// with host info wired on the route table (the test's stand-in for main.go's
+// SetHostInfo line), the detail page's permalink renders the scheme, host
+// and the named route's path while the rest of the page — back link,
+// navigation — stays relative.
+func TestFrontendPostViewRendersPermalink(t *testing.T) {
+	h, app := newFrontendHandler(t)
+	h.URLs().SetHostInfo("https://frontend.example.com")
+	ctx := app.WithContext(context.Background())
+
+	demo, err := ar.New[models.User](ctx).Where("username = ?", "demo").One()
+	if err != nil {
+		t.Fatalf("loading the demo account: %v", err)
+	}
+	post := ar.New[models.Post](ctx).New()
+	post.Title, post.Body, post.Status = "Permalink story", "Body of the permalink story.", models.PostStatusPublished
+	post.AuthorID = demo.ID
+	if err := post.Save(); err != nil {
+		t.Fatalf("seeding the post: %v", err)
+	}
+	permalink := "https://frontend.example.com/posts/" + strconv.FormatInt(post.ID, 10)
+
+	guest, srv := newBrowser(t, h)
+	body, status := get(t, guest, srv.URL+"/posts/"+strconv.FormatInt(post.ID, 10))
+	if status != http.StatusOK {
+		t.Fatalf("detail status = %d, want 200", status)
+	}
+	if !strings.Contains(body, `href="`+permalink+`"`) {
+		t.Errorf("the detail page lacks the permalink link %q", permalink)
+	}
+	// The permalink URL rides the page twice only — its href and its visible
+	// text — so no other link silently turned absolute.
+	if n := strings.Count(body, permalink); n != 2 {
+		t.Errorf("the permalink appears %d times, want 2 (href and text)", n)
+	}
+	// The rest of the page keeps its relative shape: the back link and the
+	// navigation's posts entry address the site itself.
+	for _, rel := range []string{`href="/posts"`, `href="/"`} {
+		if !strings.Contains(body, rel) {
+			t.Errorf("the page lacks the relative link %q", rel)
+		}
+	}
+}

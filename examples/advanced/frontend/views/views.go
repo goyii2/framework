@@ -63,13 +63,16 @@ type PostCard struct {
 	ViewURL string
 }
 
-// PostShowData drives the public detail page.
+// PostShowData drives the public detail page. PermalinkURL is the partition's
+// one absolute link — the host info main.go installs on the url manager
+// prefixed onto the named route — while every other link stays relative.
 type PostShowData struct {
-	Title   string
-	Body    string
-	Author  string
-	Created string
-	BackURL string
+	Title        string
+	Body         string
+	Author       string
+	Created      string
+	PermalinkURL string
+	BackURL      string
 }
 
 // Layout installs the frontend's light frame on every request: the frame

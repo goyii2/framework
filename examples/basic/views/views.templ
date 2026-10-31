@@ -159,6 +159,10 @@ templ postShowPage(d PostShowData) {
 	@d.Breadcrumbs
 	<h1>{ d.Title }</h1>
 	@d.Detail
+	<p class="meta">
+		{ i18n.T(ctx, "app", "Permalink", nil) }:
+		<a href={ templ.URL(d.PermalinkURL) }>{ d.PermalinkURL }</a>
+	</p>
 	<p class="actions">
 		<a class="button" href={ templ.URL(d.BackURL) }>{ i18n.T(ctx, "app", "Back to list", nil) }</a>
 		if d.CanUpdate {
