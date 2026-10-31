@@ -28,3 +28,4 @@ Status: resolved
   - 表格/行渲染基础：`TestGridViewRendersTableRows`
 - 顺手小重构：ActiveForm 与 GridView 过滤 select 的选项选中态解析抽成 `resolveOptions` 共用（activeform.go）。
 - examples/basic 列表页重构留给 36 号集成票，本票未动 examples。
+- 2026-10-31 补记（form-binding 09）：过滤读取已由表单绑定机制承接——filter struct 打 `form` 标签经 `form.BindQuery` 读 query（`form.Values` 派生 keep 保留值），查询组装仍显式归 action（`Apply`），本票「过滤行渲染归 widget、查询组装归 action」的分工不变。完整裁决见 `dev-docs/adr/0006-form-binding-layer-not-searchmodel.md` 与 `docs/组件-表单模型.md`。

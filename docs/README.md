@@ -22,6 +22,7 @@ goyii/framework 使用文档目录（面向使用者：部署、配置、使用�
 | [组件：session 与认证](组件-session与认证.md) | 会话后端、Identity/User 登录态、无状态认证、Csrf |
 | [组件：db 与 ActiveRecord](组件-db与ActiveRecord.md) | 连接、泛型 AR 查询链、Save/Delete、事务、钩子 |
 | [组件：validators](组件-validators.md) | 场景 -> zog schema、保存链路自动触发、消息翻译联动 |
+| [组件：表单模型](组件-表单模型.md) | form 标签白名单、三源绑定、Load 闭环、直绑与先查再绑、filter 过滤、Values 回填 |
 | [组件：migrate](组件-migrate.md) | 八命令、迁移编写、方言要点 |
 | [组件：log](组件-log.md) | 分级/分类、多 Target 轮转、慢查询、profile |
 | [组件：cache](组件-cache.md) | memory/file/redis 后端、依赖失效、GetOrSet |
